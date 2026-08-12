@@ -63,7 +63,8 @@ export interface BackupTask {
   name: string;
   createdAt: string;
   encrypt: boolean;
-  source: FileSystemDirectoryHandle | null;
+  /** One or more source folders; files are stored under the folder's name. */
+  sources: FileSystemDirectoryHandle[];
   dest: FileSystemDirectoryHandle | null;
   lastRun: RunSummary | null;
 }
@@ -83,6 +84,9 @@ export interface Progress {
   bytesDone: number;
   newBlocks: number;
   dedupBlocks: number;
+  /** Known after the scan phase; 0 while still scanning. */
+  totalFiles: number;
+  totalBytes: number;
 }
 
 export type ProgressFn = (p: Progress) => void;

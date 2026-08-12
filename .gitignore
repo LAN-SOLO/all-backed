@@ -4,3 +4,4 @@ dist-firefox/
 *.zip
 *.local
 .DS_Store
+testdata-out/

@@ -89,6 +89,17 @@ export async function openRepo(
   };
 }
 
+/** Human-readable repo label: the task name from ab-repo.json, if readable. */
+async function repoLabel(handle: FileSystemDirectoryHandle): Promise<string> {
+  const raw = await readFileIfExists(handle, REPO_CONFIG_FILE);
+  if (!raw) return handle.name;
+  try {
+    return (JSON.parse(decoder.decode(raw)) as RepoConfig).taskName || handle.name;
+  } catch {
+    return handle.name;
+  }
+}
+
 /**
  * Find task repositories reachable from a user-picked directory: the picked
  * directory itself, `<picked>/allbacked/*`, or `<picked>/*` when the user
@@ -98,7 +109,7 @@ export async function findRepos(
   dir: FileSystemDirectoryHandle
 ): Promise<{ name: string; handle: FileSystemDirectoryHandle }[]> {
   if (await fileExists(dir, REPO_CONFIG_FILE)) {
-    return [{ name: dir.name, handle: dir }];
+    return [{ name: await repoLabel(dir), handle: dir }];
   }
   let container = dir;
   try {
@@ -107,9 +118,9 @@ export async function findRepos(
     // maybe the user picked the allbacked folder itself
   }
   const repos: { name: string; handle: FileSystemDirectoryHandle }[] = [];
-  for await (const [name, handle] of container.entries()) {
+  for await (const [, handle] of container.entries()) {
     if (handle.kind === 'directory' && (await fileExists(handle, REPO_CONFIG_FILE))) {
-      repos.push({ name, handle });
+      repos.push({ name: await repoLabel(handle), handle });
     }
   }
   return repos.sort((a, b) => a.name.localeCompare(b.name));

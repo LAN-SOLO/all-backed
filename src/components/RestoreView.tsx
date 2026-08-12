@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { EngineError, Progress } from '../engine/types';
 import { OpenRepo, findRepos, listManifests, openRepo, readManifest } from '../engine/repo';
 import { runRestore } from '../engine/restore';
@@ -60,16 +60,32 @@ export default function RestoreView({ lang }: Props) {
     }
   };
 
-  const onTarPicked = async (list: FileList | null) => {
-    if (!list || list.length === 0) return;
+  const importTar = async (archive: Blob) => {
     try {
       const scratch = await opfsScratch('restore-import');
-      await untarToDirectory(list[0], scratch);
+      await untarToDirectory(archive, scratch);
       await scanDir(scratch);
     } catch (err) {
       setError(`${t('errGeneric')} ${err instanceof Error ? err.message : String(err)}`);
     }
   };
+
+  const onTarPicked = async (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    await importTar(list[0]);
+  };
+
+  // dev-only E2E bridge: feed a backup archive without the native file dialog
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const onTar = (event: Event) => {
+      const detail = (event as CustomEvent<{ file: Blob }>).detail;
+      if (detail?.file) void importTar(detail.file);
+    };
+    window.addEventListener('ab:test:restore-tar', onTar);
+    return () => window.removeEventListener('ab:test:restore-tar', onTar);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const selectRepo = async (repo: RepoEntry, pass?: string) => {
     setSelected(repo);
@@ -175,13 +191,13 @@ export default function RestoreView({ lang }: Props) {
             {t('reposFound')}
           </div>
           <div className="flex flex-wrap gap-2">
-            {repos.map((repo) => (
+            {repos.map((repo, index) => (
               <button
-                key={repo.name}
+                key={`${index}-${repo.name}`}
                 onClick={() => selectRepo(repo)}
                 disabled={running}
                 className={`rounded-lg px-3 py-1.5 text-sm ${
-                  selected?.name === repo.name
+                  selected === repo
                     ? 'bg-primary-600 text-white'
                     : 'border border-slate-600/60 text-slate-300 hover:bg-slate-700/60'
                 }`}

@@ -26,6 +26,8 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
     bytesDone: 0,
     newBlocks: 0,
     dedupBlocks: 0,
+    totalFiles: manifest.fileCount,
+    totalBytes: manifest.totalBytes,
   };
   const report = (patch: Partial<Progress>) => {
     Object.assign(progress, patch);

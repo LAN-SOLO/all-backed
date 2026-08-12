@@ -12,34 +12,23 @@ import { fileExists, walkFiles, writeFile, readFile } from './fsx';
 import { OpenRepo, decodeBlock, encodeBlock, openOrInitRepo, writeManifest } from './repo';
 
 /**
- * A backup source is either a picked directory handle (Chromium) or a flat
- * list of files with relative paths, as produced by a webkitdirectory input
- * (Firefox fallback).
+ * A backup source: either a picked directory handle (Chromium — files are
+ * stored under `<handle.name>/…`) or a named flat list of files with relative
+ * paths, as produced by a webkitdirectory input (Safari/Firefox fallback —
+ * webkitRelativePath already contains the folder name).
  */
-export type SourceInput = FileSystemDirectoryHandle | { path: string; file: File }[];
+export type SourceDir =
+  | { kind: 'handle'; handle: FileSystemDirectoryHandle }
+  | { kind: 'files'; name: string; files: { path: string; file: File }[] };
 
 export interface BackupOptions {
-  source: SourceInput;
+  sources: SourceDir[];
   dest: FileSystemDirectoryHandle;
   taskName: string;
   passphrase?: string;
   chunkSize?: number;
   verifySamples?: number;
   onProgress?: ProgressFn;
-}
-
-async function* iterateSource(
-  source: SourceInput
-): AsyncGenerator<{ path: string; getFile: () => Promise<File> }> {
-  if (Array.isArray(source)) {
-    for (const entry of source) {
-      yield { path: entry.path, getFile: async () => entry.file };
-    }
-  } else {
-    for await (const item of walkFiles(source)) {
-      yield { path: item.path, getFile: () => item.handle.getFile() };
-    }
-  }
 }
 
 async function blockDir(repo: OpenRepo, hash: string, create: boolean) {
@@ -83,23 +72,45 @@ export async function runBackup(options: BackupOptions): Promise<RunSummary> {
   const repo = await openOrInitRepo(options.dest, options.taskName, options.passphrase);
 
   const progress: Progress = {
-    phase: 'backup',
+    phase: 'scan',
     filesDone: 0,
     bytesDone: 0,
     newBlocks: 0,
     dedupBlocks: 0,
+    totalFiles: 0,
+    totalBytes: 0,
   };
   const report = (patch: Partial<Progress>) => {
     Object.assign(progress, patch);
     options.onProgress?.({ ...progress });
   };
 
+  // scan phase: materialize the full file list so progress has a real total
+  report({ phase: 'scan' });
+  const plan: { path: string; file: File }[] = [];
+  for (const source of options.sources) {
+    if (source.kind === 'files') {
+      for (const entry of source.files) {
+        plan.push(entry);
+      }
+    } else {
+      for await (const item of walkFiles(source.handle, source.handle.name)) {
+        plan.push({ path: item.path, file: await item.handle.getFile() });
+        if (plan.length % 50 === 0) report({ path: item.path });
+      }
+    }
+  }
+  report({
+    totalFiles: plan.length,
+    totalBytes: plan.reduce((sum, entry) => sum + entry.file.size, 0),
+  });
+
   const files: ManifestFile[] = [];
   let totalBytes = 0;
 
-  for await (const entry of iterateSource(options.source)) {
+  for (const entry of plan) {
     report({ phase: 'backup', path: entry.path });
-    const file = await entry.getFile();
+    const file = entry.file;
     const chunks: string[] = [];
     for (let offset = 0; offset < file.size || offset === 0; offset += chunkSize) {
       const plain = await file.slice(offset, offset + chunkSize).arrayBuffer();

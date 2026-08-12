@@ -66,7 +66,7 @@ export async function abSelfTest(log: Log = (l) => console.log(l)): Promise<bool
     t('source tree created');
 
     const run1 = await runBackup({
-      source: src,
+      sources: [{ kind: 'handle', handle: src }],
       dest: dst,
       taskName: 'Selbsttest',
       passphrase: PASS,
@@ -78,7 +78,7 @@ export async function abSelfTest(log: Log = (l) => console.log(l)): Promise<bool
     if (run1.dedupBlocks < 1) throw new Error('expected dedup within first run (copy.md)');
 
     const run2 = await runBackup({
-      source: src,
+      sources: [{ kind: 'handle', handle: src }],
       dest: dst,
       taskName: 'Selbsttest',
       passphrase: PASS,
@@ -110,7 +110,9 @@ export async function abSelfTest(log: Log = (l) => console.log(l)): Promise<bool
     if (manifests.length !== 2) throw new Error(`expected 2 manifests, got ${manifests.length}`);
 
     const restored = await runRestore({ repo, manifestName: manifests[0], target: restoreTarget });
-    const compared = await assertTreesEqual(src, restoreTarget);
+    // multi-source layout: files live below the source folder's name
+    const restoredRoot = await restoreTarget.getDirectoryHandle('ab-src');
+    const compared = await assertTreesEqual(src, restoredRoot);
     t(`restore: ${restored.fileCount} files restored, ${compared} files byte-identical`);
 
     // sanity: stored blocks must not contain plaintext
@@ -135,7 +137,7 @@ export async function abSelfTest(log: Log = (l) => console.log(l)): Promise<bool
     }
     const dst2 = await opfs.getDirectoryHandle('ab-dst2', { create: true });
     const run3 = await runBackup({
-      source: listSource,
+      sources: [{ kind: 'files', name: 'ab-src', files: listSource }],
       dest: dst2,
       taskName: 'Selbsttest',
       passphrase: PASS,
@@ -155,7 +157,7 @@ export async function abSelfTest(log: Log = (l) => console.log(l)): Promise<bool
     if (tarManifests.length !== 2) throw new Error(`tar roundtrip: expected 2 manifests, got ${tarManifests.length}`);
     const restore2 = await opfs.getDirectoryHandle('ab-restore2', { create: true });
     await runRestore({ repo: repoFromTar, manifestName: tarManifests[0], target: restore2 });
-    await assertTreesEqual(src, restore2);
+    await assertTreesEqual(src, await restore2.getDirectoryHandle('ab-src'));
     t(`tar roundtrip OK (${count} entries, restore byte-identical)`);
 
     t('PASS — engine end-to-end OK');

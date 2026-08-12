@@ -11,6 +11,41 @@
   }
 }
 
+@keyframes ab-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes ab-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ab-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(56, 189, 248, 0);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(56, 189, 248, 0.22);
+  }
+}
+
+.ab-cursor {
+  animation: ab-blink 1s steps(1) infinite;
+}
+.ab-rise {
+  animation: ab-rise 0.35s ease-out;
+}
+.ab-running {
+  animation: ab-glow 1.5s ease-in-out infinite;
+}
+
 @layer components {
   .card {
     @apply rounded-xl border border-slate-700/60 bg-slate-800/60 backdrop-blur;

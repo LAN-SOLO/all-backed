@@ -83,6 +83,13 @@ const STRINGS = {
     fBackup: 'Backup',
     fRestore: 'Restore',
     fDelete: 'Delete',
+    sources: 'SOURCES',
+    addFolder: '+ add folder',
+    removeFolder: 'remove',
+    noSources: 'no folders selected yet',
+    scanningStats: 'scanning…',
+    errNoSources: 'Add at least one source folder first.',
+    scanPhase: 'scanning sources',
   },
   de: {
     tagline: '$ allbacked --free --local --encrypted',
@@ -163,6 +170,13 @@ const STRINGS = {
     fBackup: 'Backup',
     fRestore: 'Restore',
     fDelete: 'Löschen',
+    sources: 'QUELLEN',
+    addFolder: '+ Ordner hinzufügen',
+    removeFolder: 'entfernen',
+    noSources: 'noch keine Ordner gewählt',
+    scanningStats: 'scanne…',
+    errNoSources: 'Bitte zuerst mindestens einen Quell-Ordner hinzufügen.',
+    scanPhase: 'scanne Quellen',
   },
 } as const;
 

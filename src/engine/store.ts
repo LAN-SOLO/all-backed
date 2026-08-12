@@ -33,7 +33,17 @@ function tx<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequ
 
 export async function loadTasks(): Promise<BackupTask[]> {
   const tasks = await tx<BackupTask[]>('readonly', (s) => s.getAll() as IDBRequest<BackupTask[]>);
-  return tasks.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return tasks
+    .map((task) => {
+      // migrate pre-multi-source tasks (single `source` field)
+      const legacy = task as BackupTask & { source?: FileSystemDirectoryHandle | null };
+      if (!Array.isArray(legacy.sources)) {
+        legacy.sources = legacy.source ? [legacy.source] : [];
+        delete legacy.source;
+      }
+      return legacy;
+    })
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 export function saveTask(task: BackupTask): Promise<IDBValidKey> {
@@ -50,7 +60,7 @@ export function newTask(name: string): BackupTask {
     name,
     createdAt: new Date().toISOString(),
     encrypt: true,
-    source: null,
+    sources: [],
     dest: null,
     lastRun: null,
   };

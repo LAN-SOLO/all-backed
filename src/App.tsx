@@ -92,9 +92,16 @@ export default function App() {
     selection.kind === 'task' ? tasks.find((task) => task.id === selection.id) ?? null : null;
 
   const taskSubtitle = (task: BackupTask): string => {
-    const src = supportsFsAccess ? task.source?.name ?? '—' : '…';
+    const first = task.sources[0]?.name;
+    const src = !supportsFsAccess
+      ? '…'
+      : first
+        ? task.sources.length > 1
+          ? `${first} +${task.sources.length - 1}`
+          : first
+        : '—';
     const dst = supportsFsAccess ? task.dest?.name ?? '—' : '.tar';
-    return task.source || task.dest || !supportsFsAccess
+    return task.sources.length > 0 || task.dest || !supportsFsAccess
       ? `${t('manual')}: ${src} → ${dst}`
       : t('neverRun');
   };

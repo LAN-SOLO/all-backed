@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
 import { BackupTask, EngineError, Progress, REPO_DIR, RunSummary, slugify } from '../engine/types';
-import { runBackup } from '../engine/backup';
-import { ensurePermission, getDirByPath } from '../engine/fsx';
+import { SourceDir, runBackup } from '../engine/backup';
+import { ensurePermission, getDirByPath, walkFiles } from '../engine/fsx';
 import { downloadBlob, opfsRepoContainer, supportsFsAccess } from '../engine/caps';
 import { tarDirectory } from '../engine/tar';
 import { Lang, makeT } from '../i18n';
@@ -13,12 +13,17 @@ interface Props {
   onDelete: () => void;
 }
 
-interface SourceFile {
-  path: string;
-  file: File;
+interface FallbackSource {
+  name: string;
+  files: { path: string; file: File }[];
 }
 
-function formatBytes(bytes: number): string {
+interface FolderStats {
+  files: number;
+  bytes: number;
+}
+
+export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KiB', 'MiB', 'GiB', 'TiB'];
   let value = bytes / 1024;
@@ -30,19 +35,13 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
-function formatDuration(ms: number, lang: Lang): string {
+function formatDuration(ms: number): string {
   const totalSeconds = Math.round(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   if (minutes === 0) return `${(ms / 1000).toFixed(1)}s`;
-  return lang === 'de' ? `${minutes}m ${seconds}s` : `${minutes}m ${seconds}s`;
+  return `${minutes}m ${seconds}s`;
 }
-
-const FolderIcon = (
-  <svg className="h-12 w-12 text-primary-400" fill="currentColor" viewBox="0 0 24 24">
-    <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" />
-  </svg>
-);
 
 const DriveIcon = (
   <svg className="h-12 w-12 text-primary-400" fill="currentColor" viewBox="0 0 24 24">
@@ -106,7 +105,8 @@ function Card({
 export default function TaskView({ task, lang, onChange, onDelete }: Props) {
   const t = makeT(lang);
   const [passphrase, setPassphrase] = useState('');
-  const [sourceFiles, setSourceFiles] = useState<SourceFile[] | null>(null);
+  const [fallbackSources, setFallbackSources] = useState<FallbackSource[]>([]);
+  const [handleStats, setHandleStats] = useState<Record<string, FolderStats>>({});
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [banner, setBanner] = useState<{ ok: boolean; summary?: RunSummary; note?: string; message?: string } | null>(null);
@@ -115,17 +115,63 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
   const lastPaint = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const pick = async (which: 'source' | 'dest') => {
-    if (!supportsFsAccess && which === 'source') {
+  // folder stats for picked directory handles (async walk, cached per name+index)
+  useEffect(() => {
+    if (!supportsFsAccess) return;
+    let cancelled = false;
+    (async () => {
+      for (const [index, handle] of task.sources.entries()) {
+        const key = `${index}:${handle.name}`;
+        if (handleStats[key]) continue;
+        let files = 0;
+        let bytes = 0;
+        try {
+          for await (const item of walkFiles(handle)) {
+            files += 1;
+            bytes += (await item.handle.getFile()).size;
+          }
+        } catch {
+          /* permission not granted yet — stats stay unknown */
+          continue;
+        }
+        if (cancelled) return;
+        setHandleStats((prev) => ({ ...prev, [key]: { files, bytes } }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.sources]);
+
+  const addSource = async () => {
+    if (!supportsFsAccess) {
       fileInput.current?.click();
       return;
     }
     try {
+      const handle = await window.showDirectoryPicker({ id: `ab-source-${task.id}`, mode: 'read' });
+      await onChange({ ...task, sources: [...task.sources, handle] });
+    } catch {
+      /* picker cancelled */
+    }
+  };
+
+  const removeSource = async (index: number) => {
+    if (supportsFsAccess) {
+      await onChange({ ...task, sources: task.sources.filter((_, i) => i !== index) });
+    } else {
+      setFallbackSources((prev) => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const pickDest = async () => {
+    try {
       const handle = await window.showDirectoryPicker({
-        id: `ab-${which}-${task.id}`,
-        mode: which === 'dest' ? 'readwrite' : 'read',
+        id: `ab-dest-${task.id}`,
+        mode: 'readwrite',
       });
-      await onChange({ ...task, [which]: handle });
+      await onChange({ ...task, dest: handle });
     } catch {
       /* picker cancelled */
     }
@@ -133,23 +179,27 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
 
   const onFilesPicked = (list: FileList | null) => {
     if (!list || list.length === 0) return;
-    setSourceFiles(
-      Array.from(list).map((file) => ({
-        path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
-        file,
-      }))
-    );
+    const files = Array.from(list).map((file) => ({
+      path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
+      file,
+    }));
+    const name = files[0].path.includes('/') ? files[0].path.split('/')[0] : files[0].path;
+    setFallbackSources((prev) => [...prev, { name, files }]);
+    if (fileInput.current) fileInput.current.value = '';
   };
 
   const run = async () => {
     if (running) return;
     setError(null);
     setBanner(null);
-    if (supportsFsAccess && (!task.source || !task.dest)) {
-      setError(t('errPickBoth'));
+    const sources: SourceDir[] = supportsFsAccess
+      ? task.sources.map((handle) => ({ kind: 'handle', handle }))
+      : fallbackSources.map((source) => ({ kind: 'files', name: source.name, files: source.files }));
+    if (sources.length === 0) {
+      setError(t('errNoSources'));
       return;
     }
-    if (!supportsFsAccess && (!sourceFiles || sourceFiles.length === 0)) {
+    if (supportsFsAccess && !task.dest) {
       setError(t('errPickBoth'));
       return;
     }
@@ -161,24 +211,21 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
     setProgress(null);
     try {
       let dest: FileSystemDirectoryHandle;
-      let source: FileSystemDirectoryHandle | SourceFile[];
       if (supportsFsAccess) {
-        await ensurePermission(task.source!, 'read');
+        for (const source of task.sources) await ensurePermission(source, 'read');
         await ensurePermission(task.dest!, 'readwrite');
-        source = task.source!;
         dest = task.dest!;
       } else {
-        source = sourceFiles!;
         dest = await opfsRepoContainer(task.id);
       }
       const summary = await runBackup({
-        source,
+        sources,
         dest,
         taskName: task.name,
         passphrase: task.encrypt ? passphrase : undefined,
         onProgress: (p) => {
           const now = performance.now();
-          if (p.phase !== 'backup' || now - lastPaint.current > 80) {
+          if (p.phase !== 'backup' || now - lastPaint.current > 60) {
             lastPaint.current = now;
             setProgress(p);
           }
@@ -233,8 +280,21 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
     };
   }, []);
 
+  // dev-only E2E bridge: inject sources without the native folder dialog
+  useEffect(() => {
+    if (!import.meta.env.DEV || supportsFsAccess) return;
+    const onAdd = (event: Event) => {
+      const detail = (event as CustomEvent<FallbackSource>).detail;
+      if (detail?.name && Array.isArray(detail.files)) {
+        setFallbackSources((prev) => [...prev, detail]);
+      }
+    };
+    window.addEventListener('ab:test:add-source', onAdd);
+    return () => window.removeEventListener('ab:test:add-source', onAdd);
+  }, []);
+
   const phaseLabel: Record<Progress['phase'], string> = {
-    scan: t('phaseBackup'),
+    scan: t('scanPhase'),
     backup: t('phaseBackup'),
     manifest: t('phaseManifest'),
     verify: t('phaseVerify'),
@@ -242,11 +302,25 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
     done: t('done'),
   };
 
-  const sourceTitle = supportsFsAccess
-    ? task.source?.name ?? '—'
-    : sourceFiles
-      ? `${sourceFiles.length} ${t('filesSelected')}`
-      : '—';
+  const sourceRows: { name: string; stats: FolderStats | null }[] = supportsFsAccess
+    ? task.sources.map((handle, index) => ({
+        name: handle.name,
+        stats: handleStats[`${index}:${handle.name}`] ?? null,
+      }))
+    : fallbackSources.map((source) => ({
+        name: source.name,
+        stats: {
+          files: source.files.length,
+          bytes: source.files.reduce((sum, f) => sum + f.file.size, 0),
+        },
+      }));
+
+  const pct =
+    progress && progress.totalBytes > 0
+      ? Math.min(100, Math.round((progress.bytesDone / progress.totalBytes) * 100))
+      : null;
+  const BAR_WIDTH = 26;
+  const filled = pct === null ? 0 : Math.round((pct / 100) * BAR_WIDTH);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -268,7 +342,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
       {/* CCC-style result banner */}
       {banner && (
         <div
-          className={`card flex items-start gap-4 p-5 ${banner.ok ? 'border-emerald-500/50' : 'border-red-500/50'}`}
+          className={`card ab-rise flex items-start gap-4 p-5 ${banner.ok ? 'border-emerald-500/50' : 'border-red-500/50'}`}
           role={banner.ok ? 'status' : 'alert'}
         >
           <span
@@ -296,7 +370,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
                 </div>
                 <div>
                   <dt className="inline font-semibold">{t('timeElapsed')}: </dt>
-                  <dd className="inline">{formatDuration(banner.summary.durationMs, lang)}</dd>
+                  <dd className="inline">{formatDuration(banner.summary.durationMs)}</dd>
                 </div>
                 <div>
                   <dt className="inline font-semibold">{t('filesCopied')}: </dt>
@@ -322,23 +396,51 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
         </div>
       )}
 
-      {/* SOURCE / DESTINATION / AUTOMATION, CCC style */}
+      {/* SOURCES list / DESTINATION / AUTOMATION, CCC layout with terminal tree */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card
-          label={t('source')}
-          icon={FolderIcon}
-          title={sourceTitle}
-          hint={t('pickSource')}
-          onClick={() => void pick('source')}
-          disabled={running}
-        />
+        <div className="card p-5">
+          <div className="mb-3 text-xs uppercase tracking-widest text-slate-500">{t('sources')}</div>
+          {sourceRows.length === 0 && (
+            <div className="py-2 text-xs text-slate-500">
+              <span className="text-primary-400">$</span> {t('noSources')}
+            </div>
+          )}
+          <ul className="space-y-1 text-sm">
+            {sourceRows.map((row, index) => (
+              <li key={`${index}:${row.name}`} className="group flex items-baseline gap-2">
+                <span className="shrink-0 text-slate-600">
+                  {index === sourceRows.length - 1 ? '└─' : '├─'}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold text-slate-100">{row.name}</span>
+                  <span className="block text-xs text-slate-500">
+                    {row.stats
+                      ? `${row.stats.files} ${t('files')} · ${formatBytes(row.stats.bytes)}`
+                      : t('scanningStats')}
+                  </span>
+                </span>
+                <button
+                  onClick={() => void removeSource(index)}
+                  disabled={running}
+                  className="shrink-0 text-xs text-slate-600 transition-colors hover:text-red-400"
+                >
+                  [{t('removeFolder')}]
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button onClick={() => void addSource()} disabled={running} className="btn-ghost mt-3 w-full text-primary-400">
+            {t('addFolder')}
+          </button>
+        </div>
+
         {supportsFsAccess ? (
           <Card
             label={t('destination')}
             icon={DriveIcon}
             title={task.dest?.name ?? '—'}
             hint={t('pickDest')}
-            onClick={() => void pick('dest')}
+            onClick={() => void pickDest()}
             disabled={running}
           />
         ) : (
@@ -352,9 +454,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
         />
       </div>
 
-      {!supportsFsAccess && (
-        <p className="text-xs text-slate-500">{t('uploadNote')}</p>
-      )}
+      {!supportsFsAccess && <p className="text-xs text-slate-500">{t('uploadNote')}</p>}
 
       <input
         ref={fileInput}
@@ -394,22 +494,38 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
       </div>
 
       {error && (
-        <div className="card border-red-500/50 p-4 text-sm text-red-300" role="alert">
-          {error}
+        <div className="card ab-rise border-red-500/50 p-4 text-sm text-red-300" role="alert">
+          <span className="text-primary-400">$</span> {error}
         </div>
       )}
 
+      {/* terminal-style live log */}
       {running && (
-        <div className="card p-5">
-          <div className="mb-2 text-xs uppercase tracking-widest text-slate-500">{t('log')}</div>
-          <div className="space-y-1 text-sm text-slate-300">
-            <div>
-              <span className="text-primary-400">$</span> {phaseLabel[progress?.phase ?? 'backup']}
+        <div className="ab-rise ab-running overflow-hidden rounded-xl border border-slate-700/60 bg-slate-950/90">
+          <div className="flex items-center gap-1.5 border-b border-slate-700/60 px-3 py-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-red-500/80" />
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-400/80" />
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/80" />
+            <span className="ml-2 truncate text-xs text-slate-500">
+              allbacked — {task.name}
+            </span>
+          </div>
+          <div className="space-y-1.5 p-4 text-sm text-slate-300">
+            <div className="truncate">
+              <span className="text-primary-400">$ </span>
+              {phaseLabel[progress?.phase ?? 'scan']}
               {progress?.path ? `: ${progress.path}` : '…'}
+              <span className="ab-cursor text-primary-400">▌</span>
+            </div>
+            <div className="text-primary-400">
+              [{'█'.repeat(filled)}{'░'.repeat(BAR_WIDTH - filled)}]{' '}
+              {pct === null ? '——%' : `${pct}%`}
             </div>
             {progress && (
               <div className="text-xs text-slate-500">
-                {progress.filesDone} {t('files')} · {formatBytes(progress.bytesDone)} ·{' '}
+                {progress.filesDone}/{progress.totalFiles || '?'} {t('files')} ·{' '}
+                {formatBytes(progress.bytesDone)}
+                {progress.totalBytes > 0 ? ` / ${formatBytes(progress.totalBytes)}` : ''} ·{' '}
                 {progress.newBlocks} {t('newBlocks')} · {progress.dedupBlocks} {t('dedup')}
               </div>
             )}
@@ -428,7 +544,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
               {task.lastRun.verifiedOk ? t('verified') : t('verifyFailed')}
             </span>
             {' · '}
-            {formatDuration(task.lastRun.durationMs, lang)}
+            {formatDuration(task.lastRun.durationMs)}
           </div>
         </div>
       )}

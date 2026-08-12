@@ -25,6 +25,13 @@ export async function opfsScratch(name: string): Promise<FileSystemDirectoryHand
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {
+  if (import.meta.env.DEV) {
+    // test hook: lets the E2E driver grab exports without touching ~/Downloads
+    (window as unknown as { __lastDownload?: { name: string; blob: Blob } }).__lastDownload = {
+      name: filename,
+      blob,
+    };
+  }
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
