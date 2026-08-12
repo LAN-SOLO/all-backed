@@ -1,0 +1,42 @@
+# all backed — Free MVP
+
+Backup-Tool als Browser-Extension (Chrome, MV3). Free-Tier: einfache lokale
+Sicherungen auf externe Laufwerke, verschlüsselt und dedupliziert — keine
+Systemdateien, keine Cloud, kein Konto. Produktseite:
+https://lan-solo.com/de/tools/all-backed/ · Plan: `ALL_BACKED_PLAN.md` im
+Website-Repo.
+
+## Entwicklung
+
+```bash
+pnpm install
+pnpm dev        # App als normale Web-App unter http://localhost:5173
+pnpm build      # Type-Check + dist/ (entpackte Extension)
+```
+
+Extension laden: `chrome://extensions` → Entwicklermodus → „Entpackte
+Erweiterung laden" → `dist/`-Ordner wählen. Der Toolbar-Button öffnet die App
+als Tab.
+
+Engine-Selbsttest (Dev-Server, läuft komplett über OPFS):
+Konsole öffnen → `await window.abSelfTest()`.
+
+## Architektur (MVP)
+
+- **UI:** React + Tailwind, Task-Modell nach CCC-Vorbild (Quelle → Ziel → Sichern),
+  alle Texte zweisprachig (EN/DE) in `src/i18n.ts`
+- **Engine** (`src/engine/`): File System Access API, Chunking (4 MiB fest),
+  SHA-256-Dedup, gzip (CompressionStream), AES-256-GCM (WebCrypto),
+  Schlüssel aus Passphrase via PBKDF2-SHA-256 (310k Iterationen),
+  Stichproben-Verify nach jedem Lauf, Restore aus jeder Version
+- **Repository-Format v1:** `allbacked/<task>/ab-repo.json` + `blocks/<hh>/<hash>`
+  + `manifests/manifest-<ts>.json[.enc]` — selbstbeschreibend, dokumentiert in
+  `src/engine/types.ts`
+
+## Bewusste MVP-Vereinfachungen (Upgrade-Pfad im Plan)
+
+- TypeScript-Engine statt Rust/WASM-Core (Format bleibt stabil, Core austauschbar)
+- Fixe Chunk-Größe statt content-defined chunking
+- gzip statt zstd, PBKDF2 statt Argon2id
+- Block-Dateinamen = Klartext-SHA-256 (Fingerprint-Leak; später keyed hashes)
+- Kein Zeitplan, kein Firefox-Pfad (Pro / Phase 2)

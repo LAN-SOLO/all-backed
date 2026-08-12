@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "all backed",
+  "version": "0.1.0",
+  "description": "Simple, encrypted local backups to external drives — straight from your browser.",
+  "action": {
+    "default_title": "all backed"
+  },
+  "background": {
+    "service_worker": "sw.js"
+  },
+  "permissions": ["storage", "unlimitedStorage"]
+}
