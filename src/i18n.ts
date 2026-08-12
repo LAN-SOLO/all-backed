@@ -54,6 +54,15 @@ const STRINGS = {
     errPassphraseEmpty: 'Choose a passphrase or disable encryption.',
     errGeneric: 'Something went wrong:',
     freeBadge: '// free tier — local backups, no system files, no cloud',
+    filesSelected: 'files selected',
+    fallbackHint:
+      'This browser cannot write to folders directly. Backups are staged locally in the browser and downloaded as a .tar archive; keep that archive on your external drive.',
+    fallbackDest: 'Staged in browser storage, then downloaded as a .tar archive',
+    pickTar: 'Choose backup archive (.tar)',
+    restoreIntroFallback: 'Pick the .tar backup archive you downloaded after a backup run.',
+    restoredTarHint: 'downloaded as a .tar archive — unpack it to get your files.',
+    exportedTar: 'Backup archive downloaded',
+    fallbackBadge: '// archive mode — no direct folder writes in this browser',
   },
   de: {
     tagline: '$ allbacked --free --local --encrypted',
@@ -105,6 +114,15 @@ const STRINGS = {
     errPassphraseEmpty: 'Bitte Passphrase wählen oder Verschlüsselung deaktivieren.',
     errGeneric: 'Da ist etwas schiefgelaufen:',
     freeBadge: '// Free-Tier — lokale Backups, keine Systemdateien, keine Cloud',
+    filesSelected: 'Dateien ausgewählt',
+    fallbackHint:
+      'Dieser Browser kann nicht direkt in Ordner schreiben. Backups werden lokal im Browser vorbereitet und als .tar-Archiv heruntergeladen; bewahren Sie das Archiv auf Ihrem externen Laufwerk auf.',
+    fallbackDest: 'Im Browser-Speicher vorbereitet, dann als .tar-Archiv heruntergeladen',
+    pickTar: 'Backup-Archiv (.tar) wählen',
+    restoreIntroFallback: 'Wählen Sie das .tar-Backup-Archiv, das Sie nach einem Backup-Lauf heruntergeladen haben.',
+    restoredTarHint: 'als .tar-Archiv heruntergeladen — entpacken Sie es, um Ihre Dateien zu erhalten.',
+    exportedTar: 'Backup-Archiv heruntergeladen',
+    fallbackBadge: '// Archiv-Modus — dieser Browser schreibt nicht direkt in Ordner',
   },
 } as const;
 

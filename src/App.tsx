@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BackupTask } from './engine/types';
 import { deleteTask, loadTasks, newTask, saveTask } from './engine/store';
 import { Lang, detectLang, makeT } from './i18n';
+import { supportsFsAccess } from './engine/caps';
 import TaskView from './components/TaskView';
 import RestoreView from './components/RestoreView';
 
@@ -97,6 +98,9 @@ export default function App() {
         </div>
         <div className="border-t border-slate-700/60 p-4">
           <div className="mb-2 text-xs text-slate-500">{t('freeBadge')}</div>
+          {!supportsFsAccess && (
+            <div className="mb-2 text-xs text-amber-400/80">{t('fallbackBadge')}</div>
+          )}
           <div className="flex gap-2">
             {(['en', 'de'] as const).map((code) => (
               <button

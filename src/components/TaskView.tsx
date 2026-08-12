@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
-import { BackupTask, EngineError, Progress } from '../engine/types';
+import { BackupTask, EngineError, Progress, REPO_DIR, slugify } from '../engine/types';
 import { runBackup } from '../engine/backup';
-import { ensurePermission } from '../engine/fsx';
+import { ensurePermission, getDirByPath } from '../engine/fsx';
+import { downloadBlob, opfsRepoContainer, supportsFsAccess } from '../engine/caps';
+import { tarDirectory } from '../engine/tar';
 import { Lang, makeT } from '../i18n';
 
 interface Props {
@@ -9,6 +11,11 @@ interface Props {
   lang: Lang;
   onChange: (task: BackupTask) => Promise<void>;
   onDelete: () => void;
+}
+
+interface SourceFile {
+  path: string;
+  file: File;
 }
 
 function formatBytes(bytes: number): string {
@@ -26,12 +33,19 @@ function formatBytes(bytes: number): string {
 export default function TaskView({ task, lang, onChange, onDelete }: Props) {
   const t = makeT(lang);
   const [passphrase, setPassphrase] = useState('');
+  const [sourceFiles, setSourceFiles] = useState<SourceFile[] | null>(null);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const lastPaint = useRef(0);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const pick = async (which: 'source' | 'dest') => {
+    if (!supportsFsAccess && which === 'source') {
+      fileInput.current?.click();
+      return;
+    }
     try {
       const handle = await window.showDirectoryPicker({
         id: `ab-${which}-${task.id}`,
@@ -43,9 +57,24 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
     }
   };
 
+  const onFilesPicked = (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    setSourceFiles(
+      Array.from(list).map((file) => ({
+        path: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
+        file,
+      }))
+    );
+  };
+
   const run = async () => {
     setError(null);
-    if (!task.source || !task.dest) {
+    setNotice(null);
+    if (supportsFsAccess && (!task.source || !task.dest)) {
+      setError(t('errPickBoth'));
+      return;
+    }
+    if (!supportsFsAccess && (!sourceFiles || sourceFiles.length === 0)) {
       setError(t('errPickBoth'));
       return;
     }
@@ -56,11 +85,20 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
     setRunning(true);
     setProgress(null);
     try {
-      await ensurePermission(task.source, 'read');
-      await ensurePermission(task.dest, 'readwrite');
+      let dest: FileSystemDirectoryHandle;
+      let source: FileSystemDirectoryHandle | SourceFile[];
+      if (supportsFsAccess) {
+        await ensurePermission(task.source!, 'read');
+        await ensurePermission(task.dest!, 'readwrite');
+        source = task.source!;
+        dest = task.dest!;
+      } else {
+        source = sourceFiles!;
+        dest = await opfsRepoContainer(task.id);
+      }
       const summary = await runBackup({
-        source: task.source,
-        dest: task.dest,
+        source,
+        dest,
         taskName: task.name,
         passphrase: task.encrypt ? passphrase : undefined,
         onProgress: (p) => {
@@ -71,6 +109,13 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
           }
         },
       });
+      if (!supportsFsAccess) {
+        const repoRoot = await getDirByPath(dest, [REPO_DIR, slugify(task.name)], false);
+        const archive = await tarDirectory(repoRoot);
+        const stamp = new Date().toISOString().slice(0, 10);
+        downloadBlob(archive, `allbacked-${slugify(task.name)}-${stamp}.tar`);
+        setNotice(`${t('exportedTar')} (${formatBytes(archive.size)})`);
+      }
       await onChange({ ...task, lastRun: summary });
     } catch (err) {
       if (err instanceof EngineError && err.code === 'passphrase-required') {
@@ -94,6 +139,12 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
     done: t('done'),
   };
 
+  const sourceLabel = supportsFsAccess
+    ? task.source?.name ?? '—'
+    : sourceFiles
+      ? `${sourceFiles.length} ${t('filesSelected')}`
+      : '—';
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex items-center justify-between gap-4">
@@ -108,38 +159,55 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
         </button>
       </div>
 
+      {!supportsFsAccess && (
+        <div className="card border-primary-500/40 p-4 text-xs text-slate-400">{t('fallbackHint')}</div>
+      )}
+
       {/* Source → Destination, CCC style */}
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
-        {(['source', 'dest'] as const).map((which, index) => {
-          const handle = which === 'source' ? task.source : task.dest;
-          return (
-            <div key={which} className={index === 1 ? '' : ''} style={{ gridColumn: index === 0 ? 1 : 3 }}>
-              <button
-                onClick={() => pick(which)}
-                disabled={running}
-                className="card block w-full p-6 text-left transition-colors hover:border-primary-500/60"
-              >
-                <div className="mb-2 text-xs uppercase tracking-widest text-slate-500">
-                  {which === 'source' ? t('source') : t('destination')}
-                </div>
-                <div className="truncate text-lg font-semibold text-slate-100">
-                  {handle ? handle.name : '—'}
-                </div>
-                <div className="mt-1 text-xs text-primary-400">
-                  {handle
-                    ? which === 'source'
-                      ? t('pickSource')
-                      : t('pickDest')
-                    : `${which === 'source' ? t('pickSource') : t('pickDest')} (${t('notSelected')})`}
-                </div>
-              </button>
+        <button
+          onClick={() => pick('source')}
+          disabled={running}
+          className="card block w-full p-6 text-left transition-colors hover:border-primary-500/60"
+        >
+          <div className="mb-2 text-xs uppercase tracking-widest text-slate-500">{t('source')}</div>
+          <div className="truncate text-lg font-semibold text-slate-100">{sourceLabel}</div>
+          <div className="mt-1 text-xs text-primary-400">{t('pickSource')}</div>
+        </button>
+        <div className="text-2xl text-primary-500">→</div>
+        {supportsFsAccess ? (
+          <button
+            onClick={() => pick('dest')}
+            disabled={running}
+            className="card block w-full p-6 text-left transition-colors hover:border-primary-500/60"
+          >
+            <div className="mb-2 text-xs uppercase tracking-widest text-slate-500">
+              {t('destination')}
             </div>
-          );
-        })}
-        <div className="text-2xl text-primary-500" style={{ gridColumn: 2, gridRow: 1 }}>
-          →
-        </div>
+            <div className="truncate text-lg font-semibold text-slate-100">
+              {task.dest?.name ?? '—'}
+            </div>
+            <div className="mt-1 text-xs text-primary-400">{t('pickDest')}</div>
+          </button>
+        ) : (
+          <div className="card block w-full p-6 text-left">
+            <div className="mb-2 text-xs uppercase tracking-widest text-slate-500">
+              {t('destination')}
+            </div>
+            <div className="truncate text-lg font-semibold text-slate-100">.tar</div>
+            <div className="mt-1 text-xs text-slate-400">{t('fallbackDest')}</div>
+          </div>
+        )}
       </div>
+
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => onFilesPicked(e.target.files)}
+        {...({ webkitdirectory: '' } as Record<string, string>)}
+      />
 
       {/* Encryption */}
       <div className="card space-y-3 p-5">
@@ -177,6 +245,9 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
         <div className="card border-red-500/50 p-4 text-sm text-red-300" role="alert">
           {error}
         </div>
+      )}
+      {notice && (
+        <div className="card border-emerald-500/50 p-4 text-sm text-emerald-300">{notice}</div>
       )}
 
       {(progress || running) && (

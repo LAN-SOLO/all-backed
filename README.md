@@ -1,7 +1,7 @@
 # all backed — Free MVP
 
-Backup-Tool als Browser-Extension (Chrome, MV3). Free-Tier: einfache lokale
-Sicherungen auf externe Laufwerke, verschlüsselt und dedupliziert — keine
+Backup-Tool als Browser-Extension (Chrome + Firefox, MV3). Free-Tier: einfache
+lokale Sicherungen auf externe Laufwerke, verschlüsselt und dedupliziert — keine
 Systemdateien, keine Cloud, kein Konto. Produktseite:
 https://lan-solo.com/de/tools/all-backed/ · Plan: `ALL_BACKED_PLAN.md` im
 Website-Repo.
@@ -10,16 +10,38 @@ Website-Repo.
 
 ```bash
 pnpm install
-pnpm dev        # App als normale Web-App unter http://localhost:5173
-pnpm build      # Type-Check + dist/ (entpackte Extension)
+pnpm dev              # App als normale Web-App unter http://localhost:5173
+pnpm build            # Type-Check + dist/ (Chrome, entpackte Extension)
+pnpm build:firefox    # dist-firefox/ mit Firefox-Manifest
+pnpm pack:chrome      # Store-Paket all-backed-chrome-v*.zip
+pnpm pack:firefox     # AMO-Paket all-backed-firefox-v*.zip
+node scripts/gen-icons.mjs   # Icons neu generieren (public/icons/)
 ```
 
 Extension laden: `chrome://extensions` → Entwicklermodus → „Entpackte
-Erweiterung laden" → `dist/`-Ordner wählen. Der Toolbar-Button öffnet die App
-als Tab.
+Erweiterung laden" → `dist/`-Ordner wählen. Firefox: `about:debugging` →
+„Temporäres Add-on laden" → `dist-firefox/manifest.json`. Der Toolbar-Button
+öffnet die App als Tab.
 
 Engine-Selbsttest (Dev-Server, läuft komplett über OPFS):
-Konsole öffnen → `await window.abSelfTest()`.
+Konsole öffnen → `await window.abSelfTest()` — deckt auch die
+Firefox-Fallback-Pfade ab (Listen-Quelle, Tar-Roundtrip).
+Fallback-UI in Chrome erzwingen: `http://localhost:5173/?fallback`.
+
+Store-Listings (Texte, Grafiken, Privacy-Angaben): `store/chrome-web-store.md`.
+
+## Firefox-Modus (Archiv-Modus)
+
+Firefox bietet keine File System Access API. Dort (Erkennung via
+`src/engine/caps.ts`) arbeitet die App im Archiv-Modus:
+
+- Quelle: Ordner-Auswahl per `webkitdirectory`-Input
+- Ziel: Repository wird in OPFS aufgebaut (Dedup bleibt über Läufe erhalten)
+  und nach jedem Lauf als `.tar` heruntergeladen
+- Restore: `.tar`-Archiv einlesen → Version wählen → Ergebnis als
+  `restored-*.tar`-Download
+
+Gleiches Repository-Format, gleiche Engine — nur die Ein-/Ausgänge wechseln.
 
 ## Architektur (MVP)
 

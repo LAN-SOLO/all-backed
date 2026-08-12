@@ -7,6 +7,7 @@ import { runBackup } from './backup';
 import { runRestore } from './restore';
 import { findRepos, listManifests, openRepo } from './repo';
 import { walkFiles, readFile, writeFile, getDirByPath } from './fsx';
+import { tarDirectory, untarToDirectory } from './tar';
 import { EngineError } from './types';
 
 type Log = (line: string) => void;
@@ -55,7 +56,7 @@ export async function abSelfTest(log: Log = (l) => console.log(l)): Promise<bool
   const t = (m: string) => log(`[ABTEST] ${m}`);
   try {
     const opfs = await navigator.storage.getDirectory();
-    for (const name of ['ab-src', 'ab-dst', 'ab-restore']) {
+    for (const name of ['ab-src', 'ab-dst', 'ab-dst2', 'ab-restore', 'ab-restore2', 'ab-import']) {
       await opfs.removeEntry(name, { recursive: true }).catch(() => {});
     }
     const src = await opfs.getDirectoryHandle('ab-src', { create: true });
@@ -126,6 +127,36 @@ export async function abSelfTest(log: Log = (l) => console.log(l)): Promise<bool
       break;
     }
     t('stored blocks are opaque (no plaintext)');
+
+    // Firefox fallback path 1: backup from a flat file list (webkitdirectory)
+    const listSource: { path: string; file: File }[] = [];
+    for await (const f of walkFiles(src)) {
+      listSource.push({ path: f.path, file: await f.handle.getFile() });
+    }
+    const dst2 = await opfs.getDirectoryHandle('ab-dst2', { create: true });
+    const run3 = await runBackup({
+      source: listSource,
+      dest: dst2,
+      taskName: 'Selbsttest',
+      passphrase: PASS,
+      chunkSize: 64 * 1024,
+    });
+    if (run3.fileCount !== 5 || run3.newBlocks !== 7) {
+      throw new Error(`list-source backup mismatch: files=${run3.fileCount} new=${run3.newBlocks}`);
+    }
+    t('list-source backup (fallback) OK');
+
+    // Firefox fallback path 2: tar export → import → restore
+    const archive = await tarDirectory(repos[0].handle);
+    const imported = await opfs.getDirectoryHandle('ab-import', { create: true });
+    const count = await untarToDirectory(archive, imported);
+    const repoFromTar = await openRepo(imported, PASS);
+    const tarManifests = await listManifests(repoFromTar);
+    if (tarManifests.length !== 2) throw new Error(`tar roundtrip: expected 2 manifests, got ${tarManifests.length}`);
+    const restore2 = await opfs.getDirectoryHandle('ab-restore2', { create: true });
+    await runRestore({ repo: repoFromTar, manifestName: tarManifests[0], target: restore2 });
+    await assertTreesEqual(src, restore2);
+    t(`tar roundtrip OK (${count} entries, restore byte-identical)`);
 
     t('PASS — engine end-to-end OK');
     return true;

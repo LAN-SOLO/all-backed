@@ -11,14 +11,35 @@ import { sha256Hex } from './crypto';
 import { fileExists, walkFiles, writeFile, readFile } from './fsx';
 import { OpenRepo, decodeBlock, encodeBlock, openOrInitRepo, writeManifest } from './repo';
 
+/**
+ * A backup source is either a picked directory handle (Chromium) or a flat
+ * list of files with relative paths, as produced by a webkitdirectory input
+ * (Firefox fallback).
+ */
+export type SourceInput = FileSystemDirectoryHandle | { path: string; file: File }[];
+
 export interface BackupOptions {
-  source: FileSystemDirectoryHandle;
+  source: SourceInput;
   dest: FileSystemDirectoryHandle;
   taskName: string;
   passphrase?: string;
   chunkSize?: number;
   verifySamples?: number;
   onProgress?: ProgressFn;
+}
+
+async function* iterateSource(
+  source: SourceInput
+): AsyncGenerator<{ path: string; getFile: () => Promise<File> }> {
+  if (Array.isArray(source)) {
+    for (const entry of source) {
+      yield { path: entry.path, getFile: async () => entry.file };
+    }
+  } else {
+    for await (const item of walkFiles(source)) {
+      yield { path: item.path, getFile: () => item.handle.getFile() };
+    }
+  }
 }
 
 async function blockDir(repo: OpenRepo, hash: string, create: boolean) {
@@ -76,9 +97,9 @@ export async function runBackup(options: BackupOptions): Promise<RunSummary> {
   const files: ManifestFile[] = [];
   let totalBytes = 0;
 
-  for await (const entry of walkFiles(options.source)) {
+  for await (const entry of iterateSource(options.source)) {
     report({ phase: 'backup', path: entry.path });
-    const file = await entry.handle.getFile();
+    const file = await entry.getFile();
     const chunks: string[] = [];
     for (let offset = 0; offset < file.size || offset === 0; offset += chunkSize) {
       const plain = await file.slice(offset, offset + chunkSize).arrayBuffer();

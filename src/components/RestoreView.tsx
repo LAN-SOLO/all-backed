@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { EngineError, Progress } from '../engine/types';
 import { OpenRepo, findRepos, listManifests, openRepo, readManifest } from '../engine/repo';
 import { runRestore } from '../engine/restore';
+import { downloadBlob, opfsScratch, supportsFsAccess } from '../engine/caps';
+import { tarDirectory, untarToDirectory } from '../engine/tar';
 import { Lang, makeT } from '../i18n';
 
 interface Props {
@@ -25,6 +27,7 @@ export default function RestoreView({ lang }: Props) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const tarInput = useRef<HTMLInputElement>(null);
 
   const reset = () => {
     setSelected(null);
@@ -37,15 +40,34 @@ export default function RestoreView({ lang }: Props) {
     setError(null);
   };
 
+  const scanDir = async (dir: FileSystemDirectoryHandle) => {
+    reset();
+    const found = await findRepos(dir);
+    setRepos(found);
+    if (found.length === 1) await selectRepo(found[0]);
+  };
+
   const pickRepoDir = async () => {
+    if (!supportsFsAccess) {
+      tarInput.current?.click();
+      return;
+    }
     try {
       const dir = await window.showDirectoryPicker({ id: 'ab-restore-repo', mode: 'read' });
-      reset();
-      const found = await findRepos(dir);
-      setRepos(found);
-      if (found.length === 1) await selectRepo(found[0]);
+      await scanDir(dir);
     } catch {
       /* picker cancelled */
+    }
+  };
+
+  const onTarPicked = async (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    try {
+      const scratch = await opfsScratch('restore-import');
+      await untarToDirectory(list[0], scratch);
+      await scanDir(scratch);
+    } catch (err) {
+      setError(`${t('errGeneric')} ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -82,7 +104,12 @@ export default function RestoreView({ lang }: Props) {
     setError(null);
     setDoneMsg(null);
     try {
-      const target = await window.showDirectoryPicker({ id: 'ab-restore-target', mode: 'readwrite' });
+      let target: FileSystemDirectoryHandle;
+      if (supportsFsAccess) {
+        target = await window.showDirectoryPicker({ id: 'ab-restore-target', mode: 'readwrite' });
+      } else {
+        target = await opfsScratch('restore-out');
+      }
       setRunning(true);
       const result = await runRestore({
         repo: open,
@@ -90,11 +117,18 @@ export default function RestoreView({ lang }: Props) {
         target,
         onProgress: setProgress,
       });
-      setDoneMsg(
-        `${t('restored')}: ${result.fileCount} ${t('files')} → ${target.name} (${(
-          result.durationMs / 1000
-        ).toFixed(1)}s)`
-      );
+      if (supportsFsAccess) {
+        setDoneMsg(
+          `${t('restored')}: ${result.fileCount} ${t('files')} → ${target.name} (${(
+            result.durationMs / 1000
+          ).toFixed(1)}s)`
+        );
+      } else {
+        const archive = await tarDirectory(target);
+        const stamp = new Date().toISOString().slice(0, 10);
+        downloadBlob(archive, `restored-${stamp}.tar`);
+        setDoneMsg(`${t('restored')}: ${result.fileCount} ${t('files')} — ${t('restoredTarHint')}`);
+      }
     } catch (err) {
       if (err instanceof EngineError && err.code === 'passphrase-wrong') {
         setError(t('errPassphraseWrong'));
@@ -117,10 +151,19 @@ export default function RestoreView({ lang }: Props) {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <h1 className="text-2xl font-bold text-primary-400">{t('restoreTitle')}</h1>
-      <p className="text-sm text-slate-400">{t('restoreIntro')}</p>
+      <p className="text-sm text-slate-400">
+        {supportsFsAccess ? t('restoreIntro') : t('restoreIntroFallback')}
+      </p>
       <button onClick={pickRepoDir} disabled={running} className="btn-primary">
-        {t('pickRepoDir')}
+        {supportsFsAccess ? t('pickRepoDir') : t('pickTar')}
       </button>
+      <input
+        ref={tarInput}
+        type="file"
+        accept=".tar,application/x-tar"
+        className="hidden"
+        onChange={(e) => onTarPicked(e.target.files)}
+      />
 
       {repos !== null && repos.length === 0 && (
         <div className="card p-4 text-sm text-slate-400">{t('noRepos')}</div>
