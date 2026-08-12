@@ -1,12 +1,34 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { BackupTask } from './engine/types';
 import { deleteTask, loadTasks, newTask, saveTask } from './engine/store';
-import { Lang, detectLang, makeT } from './i18n';
+import { Lang, StringKey, detectLang, makeT } from './i18n';
 import { supportsFsAccess } from './engine/caps';
 import TaskView from './components/TaskView';
 import RestoreView from './components/RestoreView';
 
 type Selection = { kind: 'task'; id: string } | { kind: 'restore' } | { kind: 'none' };
+
+function TaskStatusIcon({ task }: { task: BackupTask }) {
+  if (!task.lastRun) {
+    return <span className="mt-1 h-3 w-3 shrink-0 rounded-full border-2 border-slate-500" />;
+  }
+  const ok = task.lastRun.verifiedOk;
+  return (
+    <span
+      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${
+        ok ? 'bg-emerald-500' : 'bg-red-500'
+      }`}
+    >
+      <svg className="h-3 w-3 text-slate-950" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+        {ok ? (
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        ) : (
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        )}
+      </svg>
+    </span>
+  );
+}
 
 export default function App() {
   const [lang, setLang] = useState<Lang>(detectLang);
@@ -26,12 +48,12 @@ export default function App() {
     setLang(next);
   };
 
-  const addTask = async () => {
+  const addTask = useCallback(async () => {
     const task = newTask(lang === 'de' ? 'Neue Aufgabe' : 'New task');
     await saveTask(task);
     setTasks((prev) => [...prev, task]);
     setSelection({ kind: 'task', id: task.id });
-  };
+  }, [lang]);
 
   const updateTask = async (task: BackupTask) => {
     await saveTask(task);
@@ -47,13 +69,47 @@ export default function App() {
     });
   };
 
+  // Norton-Commander-style function keys; TaskView listens for the events
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const actions: Record<string, () => void> = {
+        F2: () => void addTask(),
+        F5: () => window.dispatchEvent(new CustomEvent('ab:run')),
+        F6: () => setSelection({ kind: 'restore' }),
+        F8: () => window.dispatchEvent(new CustomEvent('ab:delete')),
+      };
+      const action = actions[event.key];
+      if (action) {
+        event.preventDefault();
+        action();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [addTask]);
+
   const selectedTask =
     selection.kind === 'task' ? tasks.find((task) => task.id === selection.id) ?? null : null;
+
+  const taskSubtitle = (task: BackupTask): string => {
+    const src = supportsFsAccess ? task.source?.name ?? '—' : '…';
+    const dst = supportsFsAccess ? task.dest?.name ?? '—' : '.tar';
+    return task.source || task.dest || !supportsFsAccess
+      ? `${t('manual')}: ${src} → ${dst}`
+      : t('neverRun');
+  };
+
+  const fkeys: { key: string; label: StringKey; onClick: () => void }[] = [
+    { key: 'F2', label: 'fNew', onClick: () => void addTask() },
+    { key: 'F5', label: 'fBackup', onClick: () => window.dispatchEvent(new CustomEvent('ab:run')) },
+    { key: 'F6', label: 'fRestore', onClick: () => setSelection({ kind: 'restore' }) },
+    { key: 'F8', label: 'fDelete', onClick: () => window.dispatchEvent(new CustomEvent('ab:delete')) },
+  ];
 
   return (
     <div className="flex h-screen font-mono">
       {/* Sidebar */}
-      <aside className="flex w-72 shrink-0 flex-col border-r border-slate-700/60 bg-slate-950/60">
+      <aside className="flex w-80 shrink-0 flex-col border-r border-slate-700/60 bg-slate-950/60">
         <div className="border-b border-slate-700/60 p-4">
           <div className="text-2xl font-bold tracking-tight text-primary-400">all backed.</div>
           <div className="mt-1 text-xs text-slate-500">{t('tagline')}</div>
@@ -66,23 +122,22 @@ export default function App() {
               <li key={task.id}>
                 <button
                   onClick={() => setSelection({ kind: 'task', id: task.id })}
-                  className={`w-full rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                  className={`flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
                     selection.kind === 'task' && selection.id === task.id
                       ? 'bg-primary-600 text-white'
                       : 'text-slate-300 hover:bg-slate-800'
                   }`}
                 >
-                  {task.name}
-                  {task.lastRun && (
-                    <span className="mt-0.5 block text-xs opacity-70">
-                      {new Date(task.lastRun.finishedAt).toLocaleString(lang)}
-                    </span>
-                  )}
+                  <TaskStatusIcon task={task} />
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold">{task.name}</span>
+                    <span className="block truncate text-xs opacity-70">{taskSubtitle(task)}</span>
+                  </span>
                 </button>
               </li>
             ))}
           </ul>
-          <button onClick={addTask} className="btn-ghost mt-3 w-full">
+          <button onClick={() => void addTask()} className="btn-ghost mt-3 w-full">
             {t('newTask')}
           </button>
           <button
@@ -118,22 +173,49 @@ export default function App() {
       </aside>
 
       {/* Main */}
-      <main className="flex-1 overflow-y-auto p-6">
-        {selectedTask && (
-          <TaskView
-            key={selectedTask.id}
-            task={selectedTask}
-            lang={lang}
-            onChange={updateTask}
-            onDelete={() => removeTask(selectedTask.id)}
-          />
-        )}
-        {selection.kind === 'restore' && <RestoreView lang={lang} />}
-        {selection.kind === 'none' && (
-          <div className="flex h-full items-center justify-center text-slate-500">
-            <p>{t('noTasks')}</p>
-          </div>
-        )}
+      <main className="flex min-w-0 flex-1 flex-col">
+        <div className="flex-1 overflow-y-auto p-6">
+          {selectedTask && (
+            <TaskView
+              key={selectedTask.id}
+              task={selectedTask}
+              lang={lang}
+              onChange={updateTask}
+              onDelete={() => removeTask(selectedTask.id)}
+            />
+          )}
+          {selection.kind === 'restore' && <RestoreView lang={lang} />}
+          {selection.kind === 'none' && (
+            <div className="flex h-full items-center justify-center text-slate-500">
+              <p>{t('noTasks')}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Norton-Commander-style function key bar */}
+        <footer className="flex items-center gap-1 border-t border-slate-700/60 bg-slate-950/80 px-3 py-2">
+          {fkeys.map(({ key, label, onClick }) => (
+            <button
+              key={key}
+              onClick={onClick}
+              className="group flex items-center gap-1.5 rounded px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
+            >
+              <span className="rounded-sm bg-primary-600/90 px-1.5 py-0.5 font-bold text-white group-hover:bg-primary-600">
+                {key}
+              </span>
+              {t(label)}
+            </button>
+          ))}
+          <div className="flex-1" />
+          {selectedTask && (
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('ab:run'))}
+              className="btn-primary px-8 py-1.5"
+            >
+              {t('start')}
+            </button>
+          )}
+        </footer>
       </main>
     </div>
   );
