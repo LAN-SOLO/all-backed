@@ -296,6 +296,27 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
       setError(t('errPassphraseEmpty'));
       return;
     }
+    // archive mode stages everything in browser storage — check the quota
+    // up front so large backups fail with guidance instead of an OOM error
+    if (!supportsFsAccess && navigator.storage?.estimate) {
+      const needed = fallbackSources.reduce(
+        (sum, source) => sum + source.files.reduce((s, f) => s + f.file.size, 0),
+        0
+      );
+      try {
+        const estimate = await navigator.storage.estimate();
+        const free = (estimate.quota ?? Number.POSITIVE_INFINITY) - (estimate.usage ?? 0);
+        if (needed * 1.1 + 64 * 1024 * 1024 > free) {
+          setBanner({
+            ok: false,
+            message: `${t('errQuota')} — ≈${formatBytes(needed)} ${t('errQuotaNeeded')}, ≈${formatBytes(Math.max(0, free))} ${t('errQuotaFree')}. ${t('errDirectHint')}`,
+          });
+          return;
+        }
+      } catch {
+        /* estimate unsupported — proceed */
+      }
+    }
     setRunning(true);
     setProgress(null);
     try {
@@ -336,6 +357,11 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
         message = t('errPassphraseRequired');
       } else if (err instanceof EngineError && err.code === 'passphrase-wrong') {
         message = t('errPassphraseWrong');
+      } else if (
+        err instanceof DOMException &&
+        (err.name === 'QuotaExceededError' || err.name === 'UnknownError')
+      ) {
+        message = `${t('errQuota')}. ${t('errDirectHint')}`;
       } else {
         message = `${t('errGeneric')} ${err instanceof Error ? err.message : String(err)}`;
       }

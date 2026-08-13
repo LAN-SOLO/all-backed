@@ -47,7 +47,7 @@ export async function fileExists(
 export async function writeFile(
   dir: FileSystemDirectoryHandle,
   name: string,
-  data: ArrayBuffer | string
+  data: ArrayBuffer | Blob | string
 ): Promise<void> {
   const handle = await dir.getFileHandle(name, { create: true });
   const writable = await handle.createWritable();

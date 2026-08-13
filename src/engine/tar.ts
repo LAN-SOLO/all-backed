@@ -1,6 +1,10 @@
-// Minimal ustar reader/writer. Used by the Firefox fallback path: repositories
-// staged in OPFS are exported as a single .tar download, and restore reads
-// such an archive back in. No compression here — blocks are already gzip'd.
+// Minimal ustar reader/writer, streaming-friendly. Used by the Firefox/Safari
+// fallback path: repositories staged in OPFS are exported as a single .tar
+// download, and restore reads such an archive back in.
+//
+// Memory model: entry data is carried as Blob references wherever possible —
+// building the archive composes Blob parts without materializing file
+// contents, and parsing slices the source Blob instead of loading it whole.
 
 import { getDirByPath, walkFiles, writeFile } from './fsx';
 
@@ -22,7 +26,7 @@ function splitPath(path: string): { name: string; prefix: string } {
   if (path.length <= 100) return { name: path, prefix: '' };
   // split at a '/' so that name <= 100 and prefix <= 155
   for (let i = path.length - 101; i < path.length; i++) {
-    if (path[i] === '/' ) {
+    if (path[i] === '/') {
       const prefix = path.slice(0, i);
       const name = path.slice(i + 1);
       if (prefix.length <= 155 && name.length <= 100 && name.length > 0) return { name, prefix };
@@ -55,55 +59,64 @@ function header(path: string, size: number, mtimeSec: number): Uint8Array<ArrayB
 
 export interface TarEntry {
   path: string;
-  data: ArrayBuffer;
+  /** Blob parts are composed by reference — contents are not loaded into RAM. */
+  data: Blob | ArrayBuffer;
 }
 
 export function buildTar(entries: TarEntry[]): Blob {
   const parts: BlobPart[] = [];
   const now = Math.floor(Date.now() / 1000);
   for (const entry of entries) {
-    parts.push(header(entry.path, entry.data.byteLength, now));
+    const size = entry.data instanceof Blob ? entry.data.size : entry.data.byteLength;
+    parts.push(header(entry.path, size, now));
     parts.push(entry.data);
-    const pad = (BLOCK - (entry.data.byteLength % BLOCK)) % BLOCK;
+    const pad = (BLOCK - (size % BLOCK)) % BLOCK;
     if (pad > 0) parts.push(new Uint8Array(pad));
   }
   parts.push(new Uint8Array(BLOCK * 2));
   return new Blob(parts, { type: 'application/x-tar' });
 }
 
-export async function parseTar(archive: Blob): Promise<TarEntry[]> {
-  const bytes = new Uint8Array(await archive.arrayBuffer());
+export interface TarFileRef {
+  path: string;
+  size: number;
+  /** Lazy slice of the source archive — read it only when needed. */
+  data: Blob;
+}
+
+/** Iterate archive entries without loading the whole archive into memory. */
+export async function* iterTar(archive: Blob): AsyncGenerator<TarFileRef> {
   const decoder = new TextDecoder();
-  const readStr = (offset: number, length: number) => {
-    const slice = bytes.subarray(offset, offset + length);
-    const end = slice.indexOf(0);
-    return decoder.decode(end === -1 ? slice : slice.subarray(0, end));
-  };
-  const entries: TarEntry[] = [];
   let pos = 0;
-  while (pos + BLOCK <= bytes.length) {
-    const block = bytes.subarray(pos, pos + BLOCK);
-    if (block.every((b) => b === 0)) break;
-    const name = readStr(pos, 100);
-    const prefix = readStr(pos + 345, 155);
-    const size = parseInt(readStr(pos + 124, 12).trim() || '0', 8);
-    const typeflag = String.fromCharCode(bytes[pos + 156]);
+  while (pos + BLOCK <= archive.size) {
+    const head = new Uint8Array(await archive.slice(pos, pos + BLOCK).arrayBuffer());
+    if (head.every((b) => b === 0)) break;
+    const readStr = (offset: number, length: number) => {
+      const slice = head.subarray(offset, offset + length);
+      const end = slice.indexOf(0);
+      return decoder.decode(end === -1 ? slice : slice.subarray(0, end));
+    };
+    const name = readStr(0, 100);
+    const prefix = readStr(345, 155);
+    const size = parseInt(readStr(124, 12).trim() || '0', 8);
+    const typeflag = String.fromCharCode(head[156]);
     pos += BLOCK;
     if (typeflag === '0' || typeflag === '\0' || typeflag === '') {
-      const data = bytes.slice(pos, pos + size).buffer;
-      entries.push({ path: prefix ? `${prefix}/${name}` : name, data });
+      yield {
+        path: prefix ? `${prefix}/${name}` : name,
+        size,
+        data: archive.slice(pos, pos + size),
+      };
     }
     pos += Math.ceil(size / BLOCK) * BLOCK;
   }
-  return entries;
 }
 
-/** Tar every file below `dir` (paths relative to `dir`). */
+/** Tar every file below `dir` (paths relative to `dir`), by reference. */
 export async function tarDirectory(dir: FileSystemDirectoryHandle): Promise<Blob> {
   const entries: TarEntry[] = [];
   for await (const item of walkFiles(dir)) {
-    const file = await item.handle.getFile();
-    entries.push({ path: item.path, data: await file.arrayBuffer() });
+    entries.push({ path: item.path, data: await item.handle.getFile() });
   }
   return buildTar(entries);
 }
@@ -113,13 +126,14 @@ export async function untarToDirectory(
   archive: Blob,
   dir: FileSystemDirectoryHandle
 ): Promise<number> {
-  const entries = await parseTar(archive);
-  for (const entry of entries) {
+  let count = 0;
+  for await (const entry of iterTar(archive)) {
     const parts = entry.path.split('/').filter((p) => p !== '' && p !== '.' && p !== '..');
     if (parts.length === 0) continue;
     const fileName = parts.pop()!;
     const target = await getDirByPath(dir, parts, true);
     await writeFile(target, fileName, entry.data);
+    count += 1;
   }
-  return entries.length;
+  return count;
 }

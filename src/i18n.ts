@@ -91,6 +91,11 @@ const STRINGS = {
     dropActive: 'drop to add',
     destNoDirect:
       'This browser cannot write into folders (Safari/Firefox) — use Chrome to back up straight to a drive. Here, keep the downloaded .tar archive on your target drive instead.',
+    errQuota: 'Not enough browser storage for this backup',
+    errQuotaNeeded: 'needed',
+    errQuotaFree: 'free',
+    errDirectHint:
+      'Tip: in Chrome, all backed writes straight into a folder on any drive — no browser storage involved.',
     scanningStats: 'scanning…',
     errNoSources: 'Add at least one source folder first.',
     scanPhase: 'scanning sources',
@@ -182,6 +187,11 @@ const STRINGS = {
     dropActive: 'loslassen zum Hinzufügen',
     destNoDirect:
       'Dieser Browser kann nicht direkt in Ordner schreiben (Safari/Firefox) — für Backups direkt aufs Laufwerk Chrome nutzen. Hier stattdessen das heruntergeladene .tar-Archiv auf dem Ziel-Laufwerk ablegen.',
+    errQuota: 'Der Browser-Speicher reicht für dieses Backup nicht aus',
+    errQuotaNeeded: 'benötigt',
+    errQuotaFree: 'frei',
+    errDirectHint:
+      'Tipp: In Chrome sichert all backed direkt in einen Ordner auf einem beliebigen Laufwerk — ganz ohne Browser-Speicher.',
     scanningStats: 'scanne…',
     errNoSources: 'Bitte zuerst mindestens einen Quell-Ordner hinzufügen.',
     scanPhase: 'scanne Quellen',

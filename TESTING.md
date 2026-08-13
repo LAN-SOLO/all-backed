@@ -80,6 +80,37 @@ unabhängiger Weg bereit. Direktes Schreiben in Ordner bleibt in Safari
 prinzipbedingt unmöglich (keine File System Access API) — dafür Chrome oder
 später die Pro-Companion-App.
 
+## Nachtest 2026-08-13 (2) — Speicher: Streaming statt RAM
+
+Anlass: Nutzer meldet Backup-Abbruch „operation failed for an unknown
+transient reason (e.g. out of memory)" im Archiv-Modus — Browser-Speicher
+reichte nicht.
+
+Fixes:
+- Tar-Export komponiert das Archiv jetzt aus **Blob-Referenzen** (Dateiinhalte
+  werden nicht mehr in den Arbeitsspeicher geladen); Tar-Import parst per
+  `Blob.slice`-Streaming statt `arrayBuffer()` über das ganze Archiv.
+- **Quota-Vorabprüfung** (`navigator.storage.estimate`) vor jedem
+  Archiv-Modus-Lauf: zu große Backups brechen sofort mit verständlicher
+  Meldung ab (benötigt/frei) statt mitten im Lauf mit einem kryptischen
+  DOMException-Text; `QuotaExceededError`/`UnknownError` werden auf dieselbe
+  Meldung samt Chrome-Hinweis gemappt.
+
+| # | Test | Ergebnis |
+| --- | --- | --- |
+| 19 | Selbsttest mit Streaming-Tar (Roundtrip byte-identisch) | ✅ PASS |
+| 20 | **100-MB-Lasttest** Archiv-Modus: Backup 3,7 s, 25 Blöcke, Verify OK, Tar-Export 101,5 MiB — kein OOM | ✅ |
+| 21 | Restore des 100-MB-Archivs: Import, Entsperren, Version wiederhergestellt, restored-Tar 100 MiB | ✅ |
+
+Hinweis zur Automation: Ein `abSelfTest`-FAIL („file not found") während der
+Läufe war ein Artefakt zweier parallel gestarteter Selbsttests (teilen sich
+OPFS-Testordner), kein Produktfehler — Wiederholung einzeln: PASS.
+
+Einordnung: „Direkt in einen anderen Ordner transferieren" existiert im
+Chromium-Direktmodus bereits (Ziel-Ordner wählbar, kein Browser-Speicher
+beteiligt). Safari/Firefox können das API-bedingt nicht; dort bleibt der
+Archiv-Modus — jetzt mit Streaming und klarer Quota-Meldung.
+
 ## Nicht automatisierbar (manuell zu prüfen)
 
 - Chromium-Direktmodus mit echten Ordner-Pickern und Schreiben aufs externe

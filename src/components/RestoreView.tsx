@@ -148,6 +148,11 @@ export default function RestoreView({ lang }: Props) {
     } catch (err) {
       if (err instanceof EngineError && err.code === 'passphrase-wrong') {
         setError(t('errPassphraseWrong'));
+      } else if (
+        err instanceof DOMException &&
+        (err.name === 'QuotaExceededError' || err.name === 'UnknownError')
+      ) {
+        setError(`${t('errQuota')}. ${t('errDirectHint')}`);
       } else if (!(err instanceof DOMException && err.name === 'AbortError')) {
         setError(`${t('errGeneric')} ${err instanceof Error ? err.message : String(err)}`);
       }
