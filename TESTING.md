@@ -53,6 +53,33 @@ die exakt die gleichen Code-Pfade füttern wie die Dialoge.
   verhindert `preventDefault` den Reload; zusätzlich löst der Start-Button
   denselben Lauf aus.
 
+## Nachtest 2026-08-13 — Drag & Drop und Auswahl-Sichtbarkeit
+
+Anlass: Nutzer-Feedback „Upload-Dialog, Auswahl danach nicht gelistet, kein
+Ziel wählbar" (Safari).
+
+| # | Test | Ergebnis |
+| --- | --- | --- |
+| 15 | Echter Input-`change`-Pfad (programmatisch via DataTransfer, exakt der Ereignispfad des „Hochladen"-Dialogs): Quelle erscheint sofort in der Liste („datei1.txt — 2 Dateien · 22 B") | ✅ |
+| 16 | **Drag & Drop** auf das QUELLEN-Panel (neuer Weg, umgeht den Upload-Dialog): zweite Quelle wird darunter gelistet | ✅ |
+| 17 | Backup-Lauf mit gemischten Quellen (Dialog + Drop): Banner, 4 Dateien, Verify OK, Tar-Export | ✅ |
+| 18 | Ziel-Karte erklärt im Archiv-Modus explizit, warum kein Ordner wählbar ist (Browser-Limitierung) und verweist auf Chrome | ✅ |
+
+Neu implementiert: Drag & Drop von Ordnern/Dateien auf das QUELLEN-Panel.
+In Chromium liefert der Drop echte Directory-Handles (persistent, direkte
+Laufwerk-Ziele möglich); in Safari/Firefox wird der Ordner per
+`webkitGetAsEntry` rekursiv eingelesen. Gemischte Quellen (Handles +
+Sitzungs-Ordner) laufen in einem Backup zusammen.
+
+Einordnung Safari: Der gemeldete Pfad ist in Chrome nachweislich intakt
+(Tests 15–17). Safari lässt sich nicht fernsteuern; falls dort die Liste nach
+der Dialog-Auswahl weiterhin leer bleibt, bitte mit Cmd+Shift+R neu laden
+(zwischenzeitlich war der Dev-Server down) und andernfalls die
+Safari-Konsole prüfen (Entwickler-Menü). Drag & Drop steht als vom Dialog
+unabhängiger Weg bereit. Direktes Schreiben in Ordner bleibt in Safari
+prinzipbedingt unmöglich (keine File System Access API) — dafür Chrome oder
+später die Pro-Companion-App.
+
 ## Nicht automatisierbar (manuell zu prüfen)
 
 - Chromium-Direktmodus mit echten Ordner-Pickern und Schreiben aufs externe

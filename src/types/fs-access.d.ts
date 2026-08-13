@@ -14,6 +14,10 @@ interface FileSystemFileHandle {
   requestPermission(descriptor?: { mode?: 'read' | 'readwrite' }): Promise<PermissionState>;
 }
 
+interface DataTransferItem {
+  getAsFileSystemHandle?(): Promise<FileSystemHandle | null>;
+}
+
 interface Window {
   showDirectoryPicker(options?: {
     id?: string;

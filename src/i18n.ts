@@ -87,6 +87,10 @@ const STRINGS = {
     addFolder: '+ add folder',
     removeFolder: 'remove',
     noSources: 'no folders selected yet',
+    dropHint: 'drag & drop folders here — or',
+    dropActive: 'drop to add',
+    destNoDirect:
+      'This browser cannot write into folders (Safari/Firefox) — use Chrome to back up straight to a drive. Here, keep the downloaded .tar archive on your target drive instead.',
     scanningStats: 'scanning…',
     errNoSources: 'Add at least one source folder first.',
     scanPhase: 'scanning sources',
@@ -174,6 +178,10 @@ const STRINGS = {
     addFolder: '+ Ordner hinzufügen',
     removeFolder: 'entfernen',
     noSources: 'noch keine Ordner gewählt',
+    dropHint: 'Ordner per Drag & Drop hierher ziehen — oder',
+    dropActive: 'loslassen zum Hinzufügen',
+    destNoDirect:
+      'Dieser Browser kann nicht direkt in Ordner schreiben (Safari/Firefox) — für Backups direkt aufs Laufwerk Chrome nutzen. Hier stattdessen das heruntergeladene .tar-Archiv auf dem Ziel-Laufwerk ablegen.',
     scanningStats: 'scanne…',
     errNoSources: 'Bitte zuerst mindestens einen Quell-Ordner hinzufügen.',
     scanPhase: 'scanne Quellen',

@@ -43,6 +43,38 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
+// --- drag & drop folder traversal (works without the File System Access API) ---
+
+function entryFile(entry: FileSystemFileEntry): Promise<File> {
+  return new Promise((resolve, reject) => entry.file(resolve, reject));
+}
+
+async function readAllEntries(dir: FileSystemDirectoryEntry): Promise<FileSystemEntry[]> {
+  const reader = dir.createReader();
+  const all: FileSystemEntry[] = [];
+  for (;;) {
+    const batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
+      reader.readEntries(resolve, reject)
+    );
+    if (batch.length === 0) return all;
+    all.push(...batch);
+  }
+}
+
+async function collectEntryFiles(
+  entry: FileSystemEntry,
+  prefix: string,
+  out: { path: string; file: File }[]
+): Promise<void> {
+  if (entry.isFile) {
+    out.push({ path: prefix, file: await entryFile(entry as FileSystemFileEntry) });
+  } else if (entry.isDirectory) {
+    for (const child of await readAllEntries(entry as FileSystemDirectoryEntry)) {
+      await collectEntryFiles(child, `${prefix}/${child.name}`, out);
+    }
+  }
+}
+
 const DriveIcon = (
   <svg className="h-12 w-12 text-primary-400" fill="currentColor" viewBox="0 0 24 24">
     <path d="M4 5c0-1.1.9-2 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5zm2 0v9h12V5H6zm6 12.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
@@ -112,6 +144,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
   const [banner, setBanner] = useState<{ ok: boolean; summary?: RunSummary; note?: string; message?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const lastPaint = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -157,11 +190,64 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
     }
   };
 
+  // combined source list: persisted directory handles first, then session
+  // sources (webkitdirectory picks and drag & drop on non-Chromium browsers)
   const removeSource = async (index: number) => {
-    if (supportsFsAccess) {
+    if (index < task.sources.length) {
       await onChange({ ...task, sources: task.sources.filter((_, i) => i !== index) });
     } else {
-      setFallbackSources((prev) => prev.filter((_, i) => i !== index));
+      const fallbackIndex = index - task.sources.length;
+      setFallbackSources((prev) => prev.filter((_, i) => i !== fallbackIndex));
+    }
+  };
+
+  const onDrop = async (event: React.DragEvent) => {
+    event.preventDefault();
+    setIsDragOver(false);
+    if (running) return;
+    const items = Array.from(event.dataTransfer?.items ?? []);
+    // both lookups must happen synchronously, before the first await
+    const handlePromises = items.map((item) =>
+      supportsFsAccess && item.getAsFileSystemHandle
+        ? item.getAsFileSystemHandle()
+        : Promise.resolve(null)
+    );
+    const entries = items.map((item) => item.webkitGetAsEntry?.() ?? null);
+    const plainFiles = Array.from(event.dataTransfer?.files ?? []);
+    try {
+      const handles = await Promise.all(handlePromises);
+      const newHandles: FileSystemDirectoryHandle[] = [];
+      const newFallback: FallbackSource[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const handle = handles[i];
+        if (handle?.kind === 'directory') {
+          newHandles.push(handle as FileSystemDirectoryHandle);
+          continue;
+        }
+        const entry = entries[i];
+        if (entry?.isDirectory) {
+          const files: { path: string; file: File }[] = [];
+          await collectEntryFiles(entry, entry.name, files);
+          newFallback.push({ name: entry.name, files });
+        } else if (entry?.isFile) {
+          const file = await entryFile(entry as FileSystemFileEntry);
+          newFallback.push({ name: file.name, files: [{ path: file.name, file }] });
+        }
+      }
+      if (newHandles.length === 0 && newFallback.length === 0 && plainFiles.length > 0) {
+        newFallback.push({
+          name: plainFiles[0].name,
+          files: plainFiles.map((file) => ({ path: file.name, file })),
+        });
+      }
+      if (newHandles.length > 0) {
+        await onChange({ ...task, sources: [...task.sources, ...newHandles] });
+      }
+      if (newFallback.length > 0) {
+        setFallbackSources((prev) => [...prev, ...newFallback]);
+      }
+    } catch (err) {
+      setError(`${t('errGeneric')} ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -192,9 +278,12 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
     if (running) return;
     setError(null);
     setBanner(null);
-    const sources: SourceDir[] = supportsFsAccess
-      ? task.sources.map((handle) => ({ kind: 'handle', handle }))
-      : fallbackSources.map((source) => ({ kind: 'files', name: source.name, files: source.files }));
+    const sources: SourceDir[] = [
+      ...task.sources.map((handle): SourceDir => ({ kind: 'handle', handle })),
+      ...fallbackSources.map(
+        (source): SourceDir => ({ kind: 'files', name: source.name, files: source.files })
+      ),
+    ];
     if (sources.length === 0) {
       setError(t('errNoSources'));
       return;
@@ -302,18 +391,19 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
     done: t('done'),
   };
 
-  const sourceRows: { name: string; stats: FolderStats | null }[] = supportsFsAccess
-    ? task.sources.map((handle, index) => ({
-        name: handle.name,
-        stats: handleStats[`${index}:${handle.name}`] ?? null,
-      }))
-    : fallbackSources.map((source) => ({
-        name: source.name,
-        stats: {
-          files: source.files.length,
-          bytes: source.files.reduce((sum, f) => sum + f.file.size, 0),
-        },
-      }));
+  const sourceRows: { name: string; stats: FolderStats | null }[] = [
+    ...task.sources.map((handle, index) => ({
+      name: handle.name,
+      stats: handleStats[`${index}:${handle.name}`] ?? null,
+    })),
+    ...fallbackSources.map((source) => ({
+      name: source.name,
+      stats: {
+        files: source.files.length,
+        bytes: source.files.reduce((sum, f) => sum + f.file.size, 0),
+      },
+    })),
+  ];
 
   const pct =
     progress && progress.totalBytes > 0
@@ -398,7 +488,17 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
 
       {/* SOURCES list / DESTINATION / AUTOMATION, CCC layout with terminal tree */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="card p-5">
+        <div
+          className={`card p-5 transition-colors ${
+            isDragOver ? 'border-primary-400 bg-primary-600/10' : ''
+          }`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDragOver(true);
+          }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={(e) => void onDrop(e)}
+        >
           <div className="mb-3 text-xs uppercase tracking-widest text-slate-500">{t('sources')}</div>
           {sourceRows.length === 0 && (
             <div className="py-2 text-xs text-slate-500">
@@ -429,7 +529,14 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
               </li>
             ))}
           </ul>
-          <button onClick={() => void addSource()} disabled={running} className="btn-ghost mt-3 w-full text-primary-400">
+          <div className="mt-3 text-center text-xs text-slate-500">
+            {isDragOver ? (
+              <span className="text-primary-400">▼ {t('dropActive')}</span>
+            ) : (
+              t('dropHint')
+            )}
+          </div>
+          <button onClick={() => void addSource()} disabled={running} className="btn-ghost mt-2 w-full text-primary-400">
             {t('addFolder')}
           </button>
         </div>
@@ -444,7 +551,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
             disabled={running}
           />
         ) : (
-          <Card label={t('destination')} icon={ArchiveIcon} title=".tar" hint={t('fallbackDest')} />
+          <Card label={t('destination')} icon={ArchiveIcon} title=".tar" hint={t('destNoDirect')} />
         )}
         <Card
           label={t('automation')}
