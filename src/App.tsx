@@ -5,6 +5,7 @@ import { Lang, StringKey, detectLang, makeT } from './i18n';
 import { supportsFsAccess } from './engine/caps';
 import TaskView from './components/TaskView';
 import RestoreView from './components/RestoreView';
+import Help from './components/Help';
 
 type Selection = { kind: 'task'; id: string } | { kind: 'restore' } | { kind: 'none' };
 
@@ -34,6 +35,7 @@ export default function App() {
   const [lang, setLang] = useState<Lang>(detectLang);
   const [tasks, setTasks] = useState<BackupTask[]>([]);
   const [selection, setSelection] = useState<Selection>({ kind: 'none' });
+  const [helpOpen, setHelpOpen] = useState(false);
   const t = makeT(lang);
 
   useEffect(() => {
@@ -69,10 +71,13 @@ export default function App() {
     });
   };
 
-  // Norton-Commander-style function keys; TaskView listens for the events
+  // Norton-Commander-style function keys; TaskView listens for the events.
+  // While the help overlay is open it owns the keyboard (Esc, F1, arrows).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (helpOpen) return;
       const actions: Record<string, () => void> = {
+        F1: () => window.dispatchEvent(new CustomEvent('ab:help')),
         F2: () => void addTask(),
         F5: () => window.dispatchEvent(new CustomEvent('ab:run')),
         F6: () => setSelection({ kind: 'restore' }),
@@ -86,7 +91,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [addTask]);
+  }, [addTask, helpOpen]);
 
   const selectedTask =
     selection.kind === 'task' ? tasks.find((task) => task.id === selection.id) ?? null : null;
@@ -107,6 +112,7 @@ export default function App() {
   };
 
   const fkeys: { key: string; label: StringKey; onClick: () => void }[] = [
+    { key: 'F1', label: 'fHelp', onClick: () => window.dispatchEvent(new CustomEvent('ab:help')) },
     { key: 'F2', label: 'fNew', onClick: () => void addTask() },
     { key: 'F5', label: 'fBackup', onClick: () => window.dispatchEvent(new CustomEvent('ab:run')) },
     { key: 'F6', label: 'fRestore', onClick: () => setSelection({ kind: 'restore' }) },
@@ -163,7 +169,7 @@ export default function App() {
           {!supportsFsAccess && (
             <div className="mb-2 text-xs text-amber-400/80">{t('fallbackBadge')}</div>
           )}
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             {(['en', 'de'] as const).map((code) => (
               <button
                 key={code}
@@ -175,6 +181,14 @@ export default function App() {
                 {code}
               </button>
             ))}
+            <div className="flex-1" />
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('ab:help'))}
+              title={t('helpTitle')}
+              className="rounded border border-slate-600/60 px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-slate-700/60 hover:text-slate-200"
+            >
+              ?
+            </button>
           </div>
         </div>
       </aside>
@@ -224,6 +238,8 @@ export default function App() {
           )}
         </footer>
       </main>
+
+      <Help lang={lang} onOpenChange={setHelpOpen} />
     </div>
   );
 }
