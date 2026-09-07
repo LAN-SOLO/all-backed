@@ -46,7 +46,8 @@ Gleiches Repository-Format, gleiche Engine — nur die Ein-/Ausgänge wechseln.
 ## Architektur (MVP)
 
 - **UI:** React + Tailwind, Task-Modell nach CCC-Vorbild (Quelle → Ziel → Sichern),
-  alle Texte zweisprachig (EN/DE) in `src/i18n.ts`
+  alle Texte zweisprachig (EN/DE) in `src/i18n.ts`; Dunkel-Modus (Standard) und
+  Hell-Modus per Umschalter in der Seitenleiste (`src/theme.ts`, Tailwind-Variante `light:`)
 - **Engine** (`src/engine/`): File System Access API, Chunking (4 MiB fest),
   SHA-256-Dedup, gzip (CompressionStream), AES-256-GCM (WebCrypto),
   Schlüssel aus Passphrase via PBKDF2-SHA-256 (310k Iterationen),

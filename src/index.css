@@ -6,6 +6,11 @@
   html {
     @apply bg-slate-900 text-slate-100;
   }
+  /* light mode: dark stays the default look, `light:` utilities carry the alternative */
+  html.light {
+    @apply bg-slate-100 text-slate-900;
+    color-scheme: light;
+  }
   body {
     @apply antialiased;
   }
@@ -48,15 +53,15 @@
 
 @layer components {
   .card {
-    @apply rounded-xl border border-slate-700/60 bg-slate-800/60 backdrop-blur;
+    @apply rounded-xl border border-slate-700/60 bg-slate-800/60 backdrop-blur light:border-slate-300 light:bg-white;
   }
   .btn-primary {
     @apply rounded-lg bg-primary-600 px-5 py-2.5 font-mono text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-40;
   }
   .btn-ghost {
-    @apply rounded-lg border border-slate-600/60 bg-slate-800/40 px-4 py-2 font-mono text-sm text-slate-300 transition-colors hover:bg-slate-700/60 disabled:cursor-not-allowed disabled:opacity-40;
+    @apply rounded-lg border border-slate-600/60 bg-slate-800/40 px-4 py-2 font-mono text-sm text-slate-300 transition-colors hover:bg-slate-700/60 disabled:cursor-not-allowed disabled:opacity-40 light:border-slate-400/60 light:bg-white/60 light:text-slate-700 light:hover:bg-slate-300/60;
   }
   .input {
-    @apply w-full rounded-lg border border-slate-600/60 bg-slate-900/60 px-3 py-2 font-mono text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-primary-500;
+    @apply w-full rounded-lg border border-slate-600/60 bg-slate-900/60 px-3 py-2 font-mono text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-primary-500 light:border-slate-400/60 light:bg-white light:text-slate-900;
   }
 }

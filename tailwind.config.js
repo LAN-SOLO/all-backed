@@ -1,3 +1,5 @@
+import plugin from 'tailwindcss/plugin';
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: 'class',
@@ -25,5 +27,8 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // dark is the base look; `light:` utilities only kick in when <html class="light">
+    plugin(({ addVariant }) => addVariant('light', '.light &')),
+  ],
 };

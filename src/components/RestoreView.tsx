@@ -171,8 +171,8 @@ export default function RestoreView({ lang }: Props) {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <h1 className="text-2xl font-bold text-primary-400">{t('restoreTitle')}</h1>
-      <p className="text-sm text-slate-400">
+      <h1 className="text-2xl font-bold text-primary-400 light:text-primary-700">{t('restoreTitle')}</h1>
+      <p className="text-sm text-slate-400 light:text-slate-600">
         {supportsFsAccess ? t('restoreIntro') : t('restoreIntroFallback')}
       </p>
       <button onClick={pickRepoDir} disabled={running} className="btn-primary">
@@ -187,12 +187,12 @@ export default function RestoreView({ lang }: Props) {
       />
 
       {repos !== null && repos.length === 0 && (
-        <div className="card p-4 text-sm text-slate-400">{t('noRepos')}</div>
+        <div className="card p-4 text-sm text-slate-400 light:text-slate-600">{t('noRepos')}</div>
       )}
 
       {repos !== null && repos.length > 0 && (
         <div className="card p-5">
-          <div className="mb-2 text-xs uppercase tracking-widest text-slate-500">
+          <div className="mb-2 text-xs uppercase tracking-widest text-slate-500 light:text-slate-600">
             {t('reposFound')}
           </div>
           <div className="flex flex-wrap gap-2">
@@ -204,7 +204,7 @@ export default function RestoreView({ lang }: Props) {
                 className={`rounded-lg px-3 py-1.5 text-sm ${
                   selected === repo
                     ? 'bg-primary-600 text-white'
-                    : 'border border-slate-600/60 text-slate-300 hover:bg-slate-700/60'
+                    : 'border border-slate-600/60 light:border-slate-400/60 text-slate-300 light:text-slate-700 hover:bg-slate-700/60 light:hover:bg-slate-300/60'
                 }`}
               >
                 {repo.name}
@@ -216,7 +216,7 @@ export default function RestoreView({ lang }: Props) {
 
       {needPass && selected && (
         <div className="card space-y-3 p-5">
-          <div className="text-sm text-slate-300">
+          <div className="text-sm text-slate-300 light:text-slate-700">
             {selected.name} — {t('encryptedRepo')}
           </div>
           <div className="flex gap-2">
@@ -237,11 +237,11 @@ export default function RestoreView({ lang }: Props) {
 
       {open && manifests.length > 0 && (
         <div className="card p-5">
-          <div className="mb-3 text-xs uppercase tracking-widest text-slate-500">{t('versions')}</div>
+          <div className="mb-3 text-xs uppercase tracking-widest text-slate-500 light:text-slate-600">{t('versions')}</div>
           <ul className="space-y-2">
             {manifests.map((name) => (
               <li key={name} className="flex items-center justify-between gap-4">
-                <span className="text-sm text-slate-300">{manifestLabel(name)}</span>
+                <span className="text-sm text-slate-300 light:text-slate-700">{manifestLabel(name)}</span>
                 <button onClick={() => restore(name)} disabled={running} className="btn-ghost">
                   {running ? t('restoring') : t('startRestore')}
                 </button>
@@ -252,15 +252,15 @@ export default function RestoreView({ lang }: Props) {
       )}
 
       {running && progress && (
-        <div className="card p-5 text-sm text-slate-300">
-          <span className="text-primary-400">$</span> {t('phaseRestore')}
+        <div className="card p-5 text-sm text-slate-300 light:text-slate-700">
+          <span className="text-primary-400 light:text-primary-700">$</span> {t('phaseRestore')}
           {progress.path ? `: ${progress.path}` : '…'} — {progress.filesDone} {t('files')}
         </div>
       )}
 
-      {doneMsg && <div className="card border-emerald-500/50 p-4 text-sm text-emerald-300">{doneMsg}</div>}
+      {doneMsg && <div className="card border-emerald-500/50 p-4 text-sm text-emerald-300 light:text-emerald-700">{doneMsg}</div>}
       {error && (
-        <div className="card border-red-500/50 p-4 text-sm text-red-300" role="alert">
+        <div className="card border-red-500/50 p-4 text-sm text-red-300 light:text-red-700" role="alert">
           {error}
         </div>
       )}

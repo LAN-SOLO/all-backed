@@ -76,19 +76,19 @@ async function collectEntryFiles(
 }
 
 const DriveIcon = (
-  <svg className="h-12 w-12 text-primary-400" fill="currentColor" viewBox="0 0 24 24">
+  <svg className="h-12 w-12 text-primary-400 light:text-primary-700" fill="currentColor" viewBox="0 0 24 24">
     <path d="M4 5c0-1.1.9-2 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5zm2 0v9h12V5H6zm6 12.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
   </svg>
 );
 
 const ArchiveIcon = (
-  <svg className="h-12 w-12 text-primary-400" fill="currentColor" viewBox="0 0 24 24">
+  <svg className="h-12 w-12 text-primary-400 light:text-primary-700" fill="currentColor" viewBox="0 0 24 24">
     <path d="M20.54 5.23 19.15 3.55A1.99 1.99 0 0 0 17.6 3H6.4c-.62 0-1.17.28-1.55.55L3.46 5.23C3.17 5.57 3 6.02 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.48-.17-.93-.46-1.27zM6.24 5h11.52l.81.97H5.44l.8-.97zM5 19V8h14v11H5zm8.45-9h-2.9v3H8l4 4 4-4h-2.55v-3z" />
   </svg>
 );
 
 const ScheduleIcon = (
-  <svg className="h-12 w-12 text-slate-500" fill="currentColor" viewBox="0 0 24 24">
+  <svg className="h-12 w-12 text-slate-500 light:text-slate-600" fill="currentColor" viewBox="0 0 24 24">
     <path d="M12 4a8 8 0 1 0 8 8h-2a6 6 0 1 1-6-6V4zm2-1.74V4.3A8.02 8.02 0 0 1 19.7 10h2.04A10.02 10.02 0 0 0 14 2.26zM11 8v5l4.25 2.52.75-1.23-3.5-2.04V8h-1.5z" />
   </svg>
 );
@@ -110,11 +110,11 @@ function Card({
 }) {
   const inner = (
     <>
-      <div className="mb-3 text-xs uppercase tracking-widest text-slate-500">{label}</div>
+      <div className="mb-3 text-xs uppercase tracking-widest text-slate-500 light:text-slate-600">{label}</div>
       <div className="flex flex-col items-center gap-3 py-4">
         {icon}
-        <div className="max-w-full truncate text-base font-semibold text-slate-100">{title}</div>
-        <div className={`text-center text-xs ${onClick ? 'text-primary-400' : 'text-slate-500'}`}>
+        <div className="max-w-full truncate text-base font-semibold text-slate-100 light:text-slate-900">{title}</div>
+        <div className={`text-center text-xs ${onClick ? 'text-primary-400 light:text-primary-700' : 'text-slate-500 light:text-slate-600'}`}>
           {hint}
         </div>
       </div>
@@ -449,7 +449,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
         />
         <button
           onClick={() => deleteRef.current()}
-          className={`btn-ghost ${confirmingDelete ? 'border-red-500/60 text-red-300' : 'text-red-400 hover:text-red-300'}`}
+          className={`btn-ghost ${confirmingDelete ? 'border-red-500/60 text-red-300 light:text-red-700' : 'text-red-400 light:text-red-700 hover:text-red-300 light:hover:text-red-700'}`}
         >
           {confirmingDelete ? t('confirmDelete') : t('deleteTask')}
         </button>
@@ -475,11 +475,11 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
             </svg>
           </span>
           <div className="min-w-0 flex-1 text-sm">
-            <div className="mb-2 text-base font-bold text-slate-100">
+            <div className="mb-2 text-base font-bold text-slate-100 light:text-slate-900">
               {banner.ok ? t('successTitle') : t('failTitle')}
             </div>
             {banner.ok && banner.summary && (
-              <dl className="space-y-1 text-slate-300">
+              <dl className="space-y-1 text-slate-300 light:text-slate-700">
                 <div>
                   <dt className="inline font-semibold">{t('completedOn')}: </dt>
                   <dd className="inline">{new Date(banner.summary.finishedAt).toLocaleString(lang)}</dd>
@@ -498,13 +498,13 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
                   <dt className="inline font-semibold">{t('blocks')}: </dt>
                   <dd className="inline">
                     {banner.summary.newBlocks} {t('newBlocks')} · {banner.summary.dedupBlocks} {t('dedup')} ·{' '}
-                    <span className="text-emerald-400">{t('verified')}</span>
+                    <span className="text-emerald-400 light:text-emerald-700">{t('verified')}</span>
                   </dd>
                 </div>
-                {banner.note && <div className="text-emerald-300">{banner.note}</div>}
+                {banner.note && <div className="text-emerald-300 light:text-emerald-700">{banner.note}</div>}
               </dl>
             )}
-            {!banner.ok && <p className="text-red-300">{banner.message}</p>}
+            {!banner.ok && <p className="text-red-300 light:text-red-700">{banner.message}</p>}
           </div>
           <button onClick={() => setBanner(null)} className="btn-ghost shrink-0 px-4 py-1">
             {t('ok')}
@@ -525,21 +525,21 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
           onDragLeave={() => setIsDragOver(false)}
           onDrop={(e) => void onDrop(e)}
         >
-          <div className="mb-3 text-xs uppercase tracking-widest text-slate-500">{t('sources')}</div>
+          <div className="mb-3 text-xs uppercase tracking-widest text-slate-500 light:text-slate-600">{t('sources')}</div>
           {sourceRows.length === 0 && (
-            <div className="py-2 text-xs text-slate-500">
-              <span className="text-primary-400">$</span> {t('noSources')}
+            <div className="py-2 text-xs text-slate-500 light:text-slate-600">
+              <span className="text-primary-400 light:text-primary-700">$</span> {t('noSources')}
             </div>
           )}
           <ul className="space-y-1 text-sm">
             {sourceRows.map((row, index) => (
               <li key={`${index}:${row.name}`} className="group flex items-baseline gap-2">
-                <span className="shrink-0 text-slate-600">
+                <span className="shrink-0 text-slate-600 light:text-slate-500">
                   {index === sourceRows.length - 1 ? '└─' : '├─'}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold text-slate-100">{row.name}</span>
-                  <span className="block text-xs text-slate-500">
+                  <span className="block truncate font-semibold text-slate-100 light:text-slate-900">{row.name}</span>
+                  <span className="block text-xs text-slate-500 light:text-slate-600">
                     {row.stats
                       ? `${row.stats.files} ${t('files')} · ${formatBytes(row.stats.bytes)}`
                       : t('scanningStats')}
@@ -548,21 +548,21 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
                 <button
                   onClick={() => void removeSource(index)}
                   disabled={running}
-                  className="shrink-0 text-xs text-slate-600 transition-colors hover:text-red-400"
+                  className="shrink-0 text-xs text-slate-600 light:text-slate-500 transition-colors hover:text-red-400 light:hover:text-red-700"
                 >
                   [{t('removeFolder')}]
                 </button>
               </li>
             ))}
           </ul>
-          <div className="mt-3 text-center text-xs text-slate-500">
+          <div className="mt-3 text-center text-xs text-slate-500 light:text-slate-600">
             {isDragOver ? (
-              <span className="text-primary-400">▼ {t('dropActive')}</span>
+              <span className="text-primary-400 light:text-primary-700">▼ {t('dropActive')}</span>
             ) : (
               t('dropHint')
             )}
           </div>
-          <button onClick={() => void addSource()} disabled={running} className="btn-ghost mt-2 w-full text-primary-400">
+          <button onClick={() => void addSource()} disabled={running} className="btn-ghost mt-2 w-full text-primary-400 light:text-primary-700">
             {t('addFolder')}
           </button>
         </div>
@@ -587,7 +587,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
         />
       </div>
 
-      {!supportsFsAccess && <p className="text-xs text-slate-500">{t('uploadNote')}</p>}
+      {!supportsFsAccess && <p className="text-xs text-slate-500 light:text-slate-600">{t('uploadNote')}</p>}
 
       <input
         ref={fileInput}
@@ -600,7 +600,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
 
       {/* Encryption */}
       <div className="card space-y-3 p-5">
-        <label className="flex items-start gap-3 text-sm text-slate-300">
+        <label className="flex items-start gap-3 text-sm text-slate-300 light:text-slate-700">
           <input
             type="checkbox"
             checked={task.encrypt}
@@ -621,41 +621,41 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
               disabled={running}
               onChange={(e) => setPassphrase(e.target.value)}
             />
-            <p className="mt-1 text-xs text-slate-500">{t('passphraseHint')}</p>
+            <p className="mt-1 text-xs text-slate-500 light:text-slate-600">{t('passphraseHint')}</p>
           </div>
         )}
       </div>
 
       {error && (
-        <div className="card ab-rise border-red-500/50 p-4 text-sm text-red-300" role="alert">
-          <span className="text-primary-400">$</span> {error}
+        <div className="card ab-rise border-red-500/50 p-4 text-sm text-red-300 light:text-red-700" role="alert">
+          <span className="text-primary-400 light:text-primary-700">$</span> {error}
         </div>
       )}
 
       {/* terminal-style live log */}
       {running && (
-        <div className="ab-rise ab-running overflow-hidden rounded-xl border border-slate-700/60 bg-slate-950/90">
-          <div className="flex items-center gap-1.5 border-b border-slate-700/60 px-3 py-2">
+        <div className="ab-rise ab-running overflow-hidden rounded-xl border border-slate-700/60 light:border-slate-300 bg-slate-950/90 light:bg-white">
+          <div className="flex items-center gap-1.5 border-b border-slate-700/60 light:border-slate-300 px-3 py-2">
             <span className="h-2.5 w-2.5 rounded-full bg-red-500/80" />
             <span className="h-2.5 w-2.5 rounded-full bg-amber-400/80" />
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/80" />
-            <span className="ml-2 truncate text-xs text-slate-500">
+            <span className="ml-2 truncate text-xs text-slate-500 light:text-slate-600">
               allbacked — {task.name}
             </span>
           </div>
-          <div className="space-y-1.5 p-4 text-sm text-slate-300">
+          <div className="space-y-1.5 p-4 text-sm text-slate-300 light:text-slate-700">
             <div className="truncate">
-              <span className="text-primary-400">$ </span>
+              <span className="text-primary-400 light:text-primary-700">$ </span>
               {phaseLabel[progress?.phase ?? 'scan']}
               {progress?.path ? `: ${progress.path}` : '…'}
-              <span className="ab-cursor text-primary-400">▌</span>
+              <span className="ab-cursor text-primary-400 light:text-primary-700">▌</span>
             </div>
-            <div className="text-primary-400">
+            <div className="text-primary-400 light:text-primary-700">
               [{'█'.repeat(filled)}{'░'.repeat(BAR_WIDTH - filled)}]{' '}
               {pct === null ? '——%' : `${pct}%`}
             </div>
             {progress && (
-              <div className="text-xs text-slate-500">
+              <div className="text-xs text-slate-500 light:text-slate-600">
                 {progress.filesDone}/{progress.totalFiles || '?'} {t('files')} ·{' '}
                 {formatBytes(progress.bytesDone)}
                 {progress.totalBytes > 0 ? ` / ${formatBytes(progress.totalBytes)}` : ''} ·{' '}
@@ -668,12 +668,12 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
 
       {task.lastRun && !running && !banner && (
         <div className="card p-5">
-          <div className="mb-2 text-xs uppercase tracking-widest text-slate-500">{t('lastRun')}</div>
-          <div className="text-sm text-slate-300">
+          <div className="mb-2 text-xs uppercase tracking-widest text-slate-500 light:text-slate-600">{t('lastRun')}</div>
+          <div className="text-sm text-slate-300 light:text-slate-700">
             {new Date(task.lastRun.finishedAt).toLocaleString(lang)} — {task.lastRun.fileCount}{' '}
             {t('files')}, {formatBytes(task.lastRun.totalBytes)}, {task.lastRun.newBlocks}{' '}
             {t('newBlocks')}, {task.lastRun.dedupBlocks} {t('dedup')} ·{' '}
-            <span className={task.lastRun.verifiedOk ? 'text-emerald-400' : 'text-red-400'}>
+            <span className={task.lastRun.verifiedOk ? 'text-emerald-400 light:text-emerald-700' : 'text-red-400 light:text-red-700'}>
               {task.lastRun.verifiedOk ? t('verified') : t('verifyFailed')}
             </span>
             {' · '}

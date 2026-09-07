@@ -181,10 +181,11 @@ const de: Content = {
     },
     {
       id: 'lang',
-      title: 'Sprache',
+      title: 'Sprache & Darstellung',
       body: [
         'Unten links in der Seitenleiste wechseln Sie zwischen EN und DE.',
         'Beim ersten Start folgt all backed der Browser-Sprache; Ihre Wahl wird auf diesem Gerät gespeichert und bleibt erhalten.',
+        'Daneben schalten Sie mit dem Sonnen-/Mond-Symbol zwischen Dunkel- und Hell-Modus um. Standard ist der dunkle Terminal-Look; auch diese Wahl bleibt auf diesem Gerät gespeichert.',
       ],
     },
     {
@@ -355,10 +356,11 @@ const en: Content = {
     },
     {
       id: 'lang',
-      title: 'Language',
+      title: 'Language & appearance',
       body: [
         'Switch between EN and DE at the bottom left of the sidebar.',
         'On first start, all backed follows your browser language; your choice is saved on this device and sticks.',
+        'Right next to it, the sun/moon icon toggles between dark and light mode. Dark terminal look is the default; this choice is saved on this device as well.',
       ],
     },
     {
@@ -386,16 +388,16 @@ const SEEN_KEY = 'ab.tutorialSeen';
 
 function Body({ lines }: { lines: string[] }) {
   return (
-    <div className="space-y-2.5 text-sm leading-relaxed text-slate-300">
+    <div className="space-y-2.5 text-sm leading-relaxed text-slate-300 light:text-slate-700">
       {lines.map((line, i) =>
         line.startsWith('• ') ? (
           <div key={i} className="flex gap-2 pl-1">
-            <span className="shrink-0 text-primary-400">›</span>
+            <span className="shrink-0 text-primary-400 light:text-primary-700">›</span>
             <span>{line.slice(2)}</span>
           </div>
         ) : line.startsWith('$ ') ? (
-          <div key={i} className="rounded-lg border border-slate-700/60 bg-slate-950/70 px-3 py-1.5">
-            <span className="text-primary-400">$ </span>
+          <div key={i} className="rounded-lg border border-slate-700/60 light:border-slate-300 bg-slate-950/70 px-3 py-1.5 light:bg-slate-100">
+            <span className="text-primary-400 light:text-primary-700">$ </span>
             {line.slice(2)}
           </div>
         ) : (
@@ -476,18 +478,18 @@ export default function Help({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm light:bg-slate-900/40"
       onClick={close}
     >
       <div
-        className="ab-rise flex h-[85vh] max-h-[44rem] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-slate-700/60 bg-slate-900 font-mono shadow-2xl"
+        className="ab-rise flex h-[85vh] max-h-[44rem] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-slate-700/60 light:border-slate-300 bg-slate-900 light:bg-white font-mono shadow-2xl"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
         {/* Header: brand, tabs, close */}
-        <div className="flex items-center gap-2 border-b border-slate-700/60 px-4 py-3">
-          <span className="mr-2 text-sm font-bold tracking-tight text-primary-400">
+        <div className="flex items-center gap-2 border-b border-slate-700/60 light:border-slate-300 px-4 py-3">
+          <span className="mr-2 text-sm font-bold tracking-tight text-primary-400 light:text-primary-700">
             all backed.
           </span>
           {(['tutorial', 'manual'] as const).map((tab) => (
@@ -500,7 +502,7 @@ export default function Help({
               className={`rounded px-2.5 py-1 text-xs transition-colors ${
                 mode === tab
                   ? 'bg-primary-600 text-white'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                  : 'text-slate-400 light:text-slate-600 hover:bg-slate-800 light:hover:bg-slate-200 hover:text-slate-200 light:hover:text-slate-900'
               }`}
             >
               {c.labels[tab]}
@@ -510,7 +512,7 @@ export default function Help({
           <button
             onClick={close}
             aria-label={c.labels.close}
-            className="rounded px-2 py-1 text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200"
+            className="rounded px-2 py-1 text-slate-500 light:text-slate-600 transition-colors hover:bg-slate-800 light:hover:bg-slate-200 hover:text-slate-200 light:hover:text-slate-900"
           >
             ✕
           </button>
@@ -519,14 +521,14 @@ export default function Help({
         {mode === 'tutorial' && (
           <>
             <div className="flex-1 overflow-y-auto p-6">
-              <div className="mb-2 text-xs text-slate-500">
+              <div className="mb-2 text-xs text-slate-500 light:text-slate-600">
                 {'// '}
                 {c.labels.stepOf(step + 1, c.tutorial.length)}
               </div>
-              <h2 className="mb-4 text-lg font-bold text-slate-100">{c.tutorial[step].title}</h2>
+              <h2 className="mb-4 text-lg font-bold text-slate-100 light:text-slate-900">{c.tutorial[step].title}</h2>
               <Body lines={c.tutorial[step].body} />
             </div>
-            <div className="flex items-center gap-3 border-t border-slate-700/60 px-6 py-4">
+            <div className="flex items-center gap-3 border-t border-slate-700/60 light:border-slate-300 px-6 py-4">
               <button onClick={close} className="btn-ghost px-3 py-1.5 text-xs">
                 {c.labels.skip}
               </button>
@@ -535,7 +537,7 @@ export default function Help({
                   <span
                     key={i}
                     className={`h-1.5 w-1.5 rounded-full ${
-                      i === step ? 'bg-primary-400' : 'bg-slate-700'
+                      i === step ? 'bg-primary-400 light:bg-primary-600' : 'bg-slate-700 light:bg-slate-300'
                     }`}
                   />
                 ))}
@@ -560,7 +562,7 @@ export default function Help({
 
         {mode === 'manual' && (
           <div className="flex min-h-0 flex-1">
-            <div className="flex w-56 shrink-0 flex-col border-r border-slate-700/60">
+            <div className="flex w-56 shrink-0 flex-col border-r border-slate-700/60 light:border-slate-300">
               <div className="p-3">
                 <input
                   type="text"
@@ -572,7 +574,7 @@ export default function Help({
               </div>
               <div className="flex-1 space-y-0.5 overflow-y-auto px-3 pb-3">
                 {filtered.length === 0 && (
-                  <div className="px-2 py-1.5 text-xs text-slate-500">{c.labels.noResults}</div>
+                  <div className="px-2 py-1.5 text-xs text-slate-500 light:text-slate-600">{c.labels.noResults}</div>
                 )}
                 {filtered.map((section) => (
                   <button
@@ -581,7 +583,7 @@ export default function Help({
                     className={`w-full rounded px-2 py-1.5 text-left text-xs transition-colors ${
                       current?.id === section.id
                         ? 'bg-primary-600 text-white'
-                        : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                        : 'text-slate-400 light:text-slate-600 hover:bg-slate-800 light:hover:bg-slate-200 hover:text-slate-200 light:hover:text-slate-900'
                     }`}
                   >
                     {section.title}
@@ -592,7 +594,7 @@ export default function Help({
             <div className="flex-1 overflow-y-auto p-6">
               {current && (
                 <>
-                  <h2 className="mb-4 text-lg font-bold text-slate-100">{current.title}</h2>
+                  <h2 className="mb-4 text-lg font-bold text-slate-100 light:text-slate-900">{current.title}</h2>
                   <Body lines={current.body} />
                 </>
               )}
