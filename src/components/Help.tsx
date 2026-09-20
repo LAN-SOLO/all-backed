@@ -415,7 +415,13 @@ export default function Help({
   lang: Lang;
   onOpenChange?: (open: boolean) => void;
 }) {
-  const c = lang === 'de' ? de : en;
+  // Help language follows the app language but can be switched in the
+  // header at any time (DE/EN) without changing the app setting.
+  const [helpLang, setHelpLang] = useState<Lang>(lang);
+  useEffect(() => {
+    setHelpLang(lang);
+  }, [lang]);
+  const c = helpLang === 'de' ? de : en;
   const [mode, setMode] = useState<'closed' | 'tutorial' | 'manual'>(() =>
     localStorage.getItem(SEEN_KEY) ? 'closed' : 'tutorial'
   );
@@ -509,6 +515,25 @@ export default function Help({
             </button>
           ))}
           <div className="flex-1" />
+          <div
+            className="mr-1 inline-flex overflow-hidden rounded border border-slate-700/60 light:border-slate-300"
+            role="group"
+            aria-label="Sprache / Language"
+          >
+            {(['de', 'en'] as const).map((l) => (
+              <button
+                key={l}
+                onClick={() => setHelpLang(l)}
+                className={`px-2 py-0.5 text-[11px] tracking-wider transition-colors ${
+                  helpLang === l
+                    ? 'bg-slate-800 light:bg-slate-200 text-primary-400 light:text-primary-700'
+                    : 'text-slate-500 light:text-slate-600 hover:text-slate-200 light:hover:text-slate-900'
+                } ${l === 'en' ? 'border-l border-slate-700/60 light:border-slate-300' : ''}`}
+              >
+                {l.toUpperCase()}
+              </button>
+            ))}
+          </div>
           <button
             onClick={close}
             aria-label={c.labels.close}
