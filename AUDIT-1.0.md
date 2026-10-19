@@ -62,7 +62,7 @@ gelesen, Typen geprüft, gerendert) · **M** = manuell in der Checkliste
 | --- | --- | --- | --- |
 | F1 | hoch | **Endlosschleife/Tab-Freeze** im Verify, sobald Dateien Blöcke teilen (z. B. zwei leere oder zwei gleiche Dateien bei < 5 eindeutigen Blöcken). Synchrone `while`-Schleife — Tab hängt dauerhaft. Mit altem Code reproduziert. | Stichprobe aus eindeutigen Blöcken (Fisher-Yates) — R1 |
 | F2 | hoch | Falsche Passphrase bei einem **Folge-Backup** wurde nicht erkannt: neue Blöcke mit anderem Schlüssel → Repository mit zwei Schlüsseln, nicht mehr vollständig wiederherstellbar | Passphrase wird vor dem Schreiben gegen das neueste Manifest (bzw. einen Block) geprüft — R2 |
-| F3 | mittel | Umbenennen einer Aufgabe legte ein **neues Repository** an (Dedup weg, Versionen verteilt) | `repoSlug` wird beim ersten erfolgreichen Lauf festgeschrieben — R3 |
+| F3 | mittel | Umbenennen einer Aufgabe legte ein **neues Repository** an (Dedup weg, Versionen verteilt) | `repoSlug` wird festgeschrieben (seit V3 bereits beim ersten Lauf, kollisionsfrei) — R3 |
 | F4 | mittel | Zwei Quellen gleichen Namens (z. B. zweimal „Dokumente") **überschrieben sich** beim Restore; gleicher Ordner doppelt → doppelt gesichert | Eindeutige Wurzelnamen „Name (2)", `isSameEntry`-Duplikatsperre (Engine + UI) — R4 |
 | F5 | mittel | Restore-Fehler mitten in einer Datei schrieb eine **halbe Datei** (`close()` im `finally`) und brach den ganzen Restore ab | `abort()` statt `close()`, neu angelegte Datei wird entfernt, übrige Dateien werden weiter hergestellt, Fehlerliste in der UI — R6 |
 | F6 | mittel | Verify lief **nach** dem Manifest: ein fehlgeschlagener Lauf hinterließ eine kaputte Version in der Liste | Verify vor `writeManifest` |
@@ -104,9 +104,11 @@ Keine neuen Abhängigkeiten. Testinfrastruktur nutzt nur vorhandenes Vite + Node
 - Restore **überschreibt** gleichnamige Dateien im Zielordner (leeren Ordner
   wählen). Dateinamen, die das Ziel-Dateisystem verbietet (z. B. `a:b.txt`,
   `CON` unter Windows), werden übersprungen und gelistet.
-- Zwei Aufgaben mit gleichem Namen und gleichem Ziel teilen sich den
-  Repository-Ordner: gleiche Passphrase → gemeinsame Versionsliste; andere
-  Passphrase → Lauf wird abgewiesen (kein Datenverlust).
+- ~~Zwei Aufgaben mit gleichem Namen teilen sich den Repository-Ordner~~ —
+  seit der Verifikation (V3) bekommt eine Aufgabe beim ersten Lauf einen
+  Ordnernamen, den keine andere Aufgabe festgeschrieben hat (`<name>-2`).
+  Ausnahme: Zwei Aufgaben aus Vor-1.0-Zeiten, die sich bereits einen Ordner
+  teilen — die zuerst laufende behält ihn, die andere startet in `<name>-2`.
 - Linux-Quellen mit Dateien, die sich nur in Groß-/Kleinschreibung
   unterscheiden, erhalten im Backup ein „(2)"-Suffix (sonst Kollision auf
   macOS/Windows).
@@ -114,9 +116,10 @@ Keine neuen Abhängigkeiten. Testinfrastruktur nutzt nur vorhandenes Vite + Node
   Quellen gelten nur für die Sitzung.
 - Nach Browser-Neustart fragt Chrome die Ordnerrechte neu ab; bei mehreren
   Ordnern kann je Ordner eine Rückfrage kommen (ggf. Start erneut klicken).
-- Ob Chrome ohne `tabs`-Permission die URL des eigenen App-Tabs liefert, ist
-  nicht verifiziert — schlimmstenfalls öffnet der Toolbar-Klick einen zweiten
-  App-Tab statt den vorhandenen zu fokussieren (harmlos).
+- Toolbar-Klick: Chrome ≥ 116 findet den eigenen App-Tab über
+  `runtime.getContexts` (ohne `tabs`-Permission, V6). Firefox und ältere
+  Chrome-Versionen nutzen `tabs.query` — liefert der Browser dort keine URL,
+  öffnet der Klick schlimmstenfalls einen zweiten App-Tab (harmlos).
 - Kein Zeitplan (Pro).
 
 ## 6. Manuelle Testcheckliste (macOS und Windows)
@@ -140,7 +143,9 @@ Backup (Chrome)
 - [ ] Verschlüsselung aus bei verschlüsseltem Repo → Meldung „Passphrase erforderlich"
 - [ ] Browser neu starten → Quelle zeigt „Zugriff wird beim nächsten Lauf angefragt" → Start → Rechte-Prompts → Lauf OK
 - [ ] Laufwerk während des Laufs abziehen → verständliche Meldung, App bleibt bedienbar
-- [ ] Datei während des Laufs ändern / in Windows in Office geöffnet (gesperrt) → Meldung „konnte nicht gelesen werden"
+- [ ] Datei während des Laufs ändern / unter Windows eine in Outlook geöffnete `.pst` oder eine gesperrte Datei sichern → Lauf endet erfolgreich, Banner listet die Datei gelb als „übersprungen“, Karte „Letzter Lauf“ ebenso
+- [ ] Windows: Laufwerkswurzel (z. B. `D:\`) als Quelle → nicht lesbare Systemordner werden übersprungen statt den Lauf abzubrechen (falls Chrome die Wurzel überhaupt zulässt)
+- [ ] Während eines Laufs: andere Aufgabe, „+ Neue Aufgabe“, „Wiederherstellen“, F2, F6 gesperrt; Tab schließen → Browser fragt nach
 
 Restore (Chrome)
 - [ ] F6 → Backup-Ort wählen → Repo gefunden, „verschlüsselt", falsche Passphrase abgelehnt, richtige → Versionen
@@ -159,3 +164,53 @@ Oberfläche
 - [ ] Hell-/Dunkel-Modus: alle Karten, Banner, Fehlerlisten, Hilfe lesbar; bleibt nach Neuladen
 - [ ] F1/F2/F5/F6/F8 (F5 lädt die Seite nicht neu); F8 zweimal zum Löschen; während Lauf gesperrt
 - [ ] Wortmarke „all/backed." — Name blau, Punkt weiß (dunkel) bzw. dunkel (hell)
+
+## 7. Verifikation (unabhängige Zweitprüfung, 2026-10-19)
+
+Zweiter Prüfer, Basis `30a26a4`. Ziel: die Aussagen oben widerlegen und
+Übersehenes finden.
+
+### 7.1 Was tatsächlich ausgeführt wurde
+
+| Weg | Ergebnis |
+| --- | --- |
+| `pnpm typecheck` | fehlerfrei |
+| `pnpm test` (Node + memfs) | PASS — 9 Basis-Schritte + R1–R8, R10, R11 |
+| **Echter Browser:** `await window.abSelfTest()` im Dev-Server, gesteuert per CDP in Playwrights `chrome-headless-shell` (Chromium, echtes OPFS) | PASS — alle Schritte inkl. R10/R11. Damit ist die Behauptung „kein Browser ausführbar“ überholt: Engine und OPFS laufen in echtem Chromium |
+| **Echter Browser, UI:** App im Archiv-Modus (`?fallback`): Tutorial schließen, F2, Quelle über `ab:test:add-source` (inkl. einer Datei, deren Snapshot vor dem Lauf veraltet ist), Verschlüsselung aus, F5 | Banner „erfolgreich“, 2 Dateien, gelbe Liste „1 übersprungen — Docs/stale.txt — gesperrt oder beim Lesen geändert“; „Wiederherstellen“ während des Laufs gesperrt, danach wieder frei |
+| Chromium-Verhalten nachgemessen | Ein `File` aus `getFile()`, dessen Datei danach gespeichert wird, wirft beim Lesen `NotReadableError`; unzulässige Namen werfen `TypeError: … Name is not allowed.` |
+| Negativkontrolle | R10 mit dem alten Lesepfad (Scan-Snapshot) in Chromium: **FAIL** (die geänderte Datei fehlt) — der Test erkennt den Fehler wirklich |
+| `sw.js` mit Mock-API (Scratch) | 7/7: eigener Tab über `getContexts`, leere/werfende `getContexts` → Rückfall, fremder Tab nie fokussiert, Tab weg → neuer Tab, `tabId -1` ignoriert |
+| SSR-Render (Scratch) | TaskView mit übersprungenen Dateien (EN + DE), RestoreView, Help fehlerfrei; i18n-Schlüssel EN/DE identisch (je 113) |
+| `pnpm build` / `pnpm build:firefox` | fehlerfrei; Zips in `.Deploy/main-1.0.0-<sha>-extension/` |
+
+### 7.2 Neu gefundene und behobene Fehler
+
+| # | Schwere | Fehler | Fix |
+| --- | --- | --- | --- |
+| V1 | hoch | **Eine einzige gesperrte, geänderte oder gelöschte Datei ließ den ganzen Backup-Lauf scheitern.** Der Scan sammelte alle `File`-Snapshots vorab; Chromium wirft `NotReadableError`, sobald eine Datei zwischen Scan und Lesen gespeichert wird (in echtem Chromium nachgemessen). Bei großen Backups ist das fast sicher (Logs, offene Office-/Outlook-Dateien unter Windows); ein nicht lesbarer Unterordner (Laufwerkswurzel unter Windows) brach ebenfalls alles ab | Handle-Quellen öffnen die Datei direkt vor dem Lesen neu (geänderte Datei wird im neuen Stand gesichert). Gesperrte/verschwundene Dateien und nicht lesbare Unterordner werden übersprungen und mit Grund in Banner und „Letzter Lauf“ gelistet (max. 100 gespeichert). Rechte- und Quota-Fehler bleiben fatal — R10, UI-Lauf in Chromium |
+| V2 | mittel | **Navigation während eines Laufs** entlud die TaskView: Lauf lief unsichtbar weiter, die Aufgabe ließ sich danach erneut starten oder **löschen** — und wurde vom weiterlaufenden Backup beim Abschluss wieder in IndexedDB geschrieben. Gleiches für einen Restore. Die Hilfe-Aussage „während des Laufs gesperrt“ war damit falsch | App sperrt Aufgabenwechsel, „+ Neue Aufgabe“, „Wiederherstellen“, F2 und F6, solange ein Backup oder Restore läuft; Tab-Schließen fragt nach (`beforeunload`) |
+| V3 | mittel | Durch F3 (festgeschriebener `repoSlug`) entstand ein neuer Kollisionsfall: Aufgabe „Neue Aufgabe“ läuft, wird in „Fotos“ umbenannt; eine neue „Neue Aufgabe“ schreibt dann **in dasselbe Repository** — mit anderer Passphrase dauerhaft „falsche Passphrase“ | `pickRepoSlug`: beim ersten Lauf wird ein Ordnername gewählt, den keine andere Aufgabe festgeschrieben hat (`neue-aufgabe-2`), und sofort gespeichert (auch bei Fehllauf) — R11 |
+| V4 | niedrig | Restore-Fehlerliste zeigte englischen Rohtext (`Name is not allowed.` usw.) | Liste übersetzt über `errorMessage`; neue Texte für unzulässige Namen (Windows `a:b.txt`, `CON`) und gesperrte Zieldateien (`NoModificationAllowedError`) |
+| V5 | niedrig | Tar-Reader lehnte Archive mit vorzeichenbehafteter Header-Prüfsumme (ältere Packer, Nicht-ASCII-Namen) ab | beide Prüfsummenvarianten wie GNU/bsdtar — R8 erweitert |
+| V6 | niedrig | Toolbar: ohne `tabs`-Permission war das Finden des eigenen Tabs unsicher | Chrome ≥ 116: `runtime.getContexts` (keine Permission nötig), sonst Rückfall wie bisher |
+
+Hilfe (DE + EN) angepasst: Ordnername beim ersten Lauf inkl. Nummerierung,
+Sperre während Backup/Restore, übersprungene Dateien.
+
+### 7.3 Bestätigt (nicht widerlegt)
+
+F1–F14 und S1–S12 nachvollzogen (Diff gelesen, Tests im Node-Harness **und**
+in echtem Chromium grün). Version 1.0.0 in `package.json`, `public/manifest.json`,
+`manifest.firefox.json`, Pack-Skripten und den gebauten Manifesten.
+
+### 7.4 Weiterhin offen / nur statisch geprüft
+
+- Native Dialoge (`showDirectoryPicker`, Rechte-Prompts), Drag & Drop, echte
+  Downloads, Toolbar-Icon, Firefox-Laufzeit und alles Windows-Spezifische
+  (Laufwerksbuchstaben, Office-Sperren, `a:b.txt`) → Checkliste Abschnitt 6.
+- Ein im Ziel beschädigter Block wird durch Dedup nie neu geschrieben: Läufe,
+  deren Verify-Stichprobe ihn trifft, scheitern weiter („Verify fehlgeschlagen“),
+  bis der Repository-Ordner ersetzt wird. Fail-loud ist gewollt; eine
+  Selbstheilung ist für nach 1.0 vorgemerkt.
+- S13–S15 unverändert (Format v1, Dev-Abhängigkeiten).
