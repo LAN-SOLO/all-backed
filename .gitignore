@@ -5,6 +5,7 @@ dist-firefox/
 *.local
 .DS_Store
 testdata-out/
+.selftest-build/
 
 # Lokale Test-Builds (macOS/Windows/Linux) — nie committen
 .Deploy/

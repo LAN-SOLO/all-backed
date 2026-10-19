@@ -2,7 +2,7 @@
   "name": "all-backed",
   "private": true,
   "version": "0.1.0",
-  "description": "all backed — simple, encrypted local backups from your browser (Free MVP)",
+  "description": "all/backed — simple, encrypted local backups from your browser",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,9 @@
     "build:firefox": "tsc --noEmit && vite build --outDir dist-firefox && node scripts/finalize-firefox.mjs",
     "pack:chrome": "cd dist && zip -qr ../all-backed-chrome-v0.1.0.zip .",
     "pack:firefox": "cd dist-firefox && zip -qr ../all-backed-firefox-v0.1.0.zip .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node scripts/selftest-node.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "react": "^18.3.1",

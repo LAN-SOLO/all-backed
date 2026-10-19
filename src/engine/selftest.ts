@@ -7,7 +7,8 @@ import { runBackup } from './backup';
 import { runRestore } from './restore';
 import { findRepos, listManifests, openRepo } from './repo';
 import { walkFiles, readFile, writeFile, getDirByPath } from './fsx';
-import { tarDirectory, untarToDirectory } from './tar';
+import { buildTar, tarDirectory, untarToDirectory } from './tar';
+import { gzip, sha256Hex } from './crypto';
 import { EngineError } from './types';
 
 type Log = (line: string) => void;
@@ -52,11 +53,250 @@ async function assertTreesEqual(
   return ma.size;
 }
 
+async function expectEngineError(code: EngineError['code'], run: () => Promise<unknown>): Promise<void> {
+  try {
+    await run();
+  } catch (err) {
+    if (err instanceof EngineError && err.code === code) return;
+    throw new Error(`expected EngineError ${code}, got ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`);
+  }
+  throw new Error(`expected EngineError ${code}, but the call succeeded`);
+}
+
+function withTimeout<T>(label: string, ms: number, work: Promise<T>): Promise<T> {
+  return Promise.race([
+    work,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label}: timed out (hang)`)), ms)),
+  ]);
+}
+
+async function treeText(dir: FileSystemDirectoryHandle): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for await (const f of walkFiles(dir)) {
+    out.set(f.path, new TextDecoder().decode(await (await f.handle.getFile()).arrayBuffer()));
+  }
+  return out;
+}
+
+/** Regression tests for the 1.0 audit fixes (see AUDIT-1.0.md). */
+async function regressionTests(opfs: FileSystemDirectoryHandle, t: (m: string) => void): Promise<void> {
+  const reg = await opfs.getDirectoryHandle('ab-reg', { create: true });
+  const fresh = async (name: string) => reg.getDirectoryHandle(name, { create: true });
+
+  // R1: chunks shared between files (two empty files, two identical files)
+  // used to hang the verify sampler forever
+  const dupSrc = await fresh('dup-src');
+  await writeFile(dupSrc, 'a.txt', new ArrayBuffer(0));
+  await writeFile(dupSrc, 'b.txt', new ArrayBuffer(0));
+  await writeFile(dupSrc, 'c.txt', 'same');
+  await writeFile(dupSrc, 'd.txt', 'same');
+  const dupRun = await withTimeout(
+    'R1',
+    20_000,
+    runBackup({ sources: [{ kind: 'handle', handle: dupSrc }], dest: await fresh('dup-dst'), taskName: 'dup' })
+  );
+  if (dupRun.fileCount !== 4 || dupRun.newBlocks !== 2) {
+    throw new Error(`R1: files=${dupRun.fileCount} new=${dupRun.newBlocks}`);
+  }
+  t('R1 shared-chunk verify terminates');
+
+  // R2: a wrong passphrase on a follow-up run must be rejected BEFORE any
+  // block is written (else the repo ends up with two keys)
+  const keySrc = await fresh('key-src');
+  await writeFile(keySrc, 'one.txt', 'first run content');
+  const keyDst = await fresh('key-dst');
+  await runBackup({ sources: [{ kind: 'handle', handle: keySrc }], dest: keyDst, taskName: 'key', passphrase: PASS });
+  await writeFile(keySrc, 'two.txt', 'new content for the second run');
+  const keyRepo = await getDirByPath(keyDst, ['allbacked', 'key'], false);
+  const countBlocks = async () => {
+    let n = 0;
+    for await (const f of walkFiles(await keyRepo.getDirectoryHandle('blocks'))) if (f) n++;
+    return n;
+  };
+  const blocksBefore = await countBlocks();
+  await expectEngineError('passphrase-wrong', () =>
+    runBackup({ sources: [{ kind: 'handle', handle: keySrc }], dest: keyDst, taskName: 'key', passphrase: 'not the passphrase' })
+  );
+  if ((await countBlocks()) !== blocksBefore) throw new Error('R2: blocks were written with the wrong key');
+  await expectEngineError('passphrase-required', () =>
+    runBackup({ sources: [{ kind: 'handle', handle: keySrc }], dest: keyDst, taskName: 'key' })
+  );
+  t('R2 wrong passphrase on follow-up backup rejected, nothing written');
+
+  // R3: pinned repoSlug — a renamed task keeps backing up into its repo
+  const renamed = await runBackup({
+    sources: [{ kind: 'handle', handle: keySrc }],
+    dest: keyDst,
+    taskName: 'Key (renamed)',
+    repoSlug: 'key',
+    passphrase: PASS,
+  });
+  if (renamed.dedupBlocks < 1) throw new Error('R3: renamed task did not reuse its repository');
+  const allRepos = await findRepos(keyDst);
+  if (allRepos.length !== 1) throw new Error(`R3: expected 1 repo after rename, found ${allRepos.length}`);
+  t('R3 renamed task keeps its repository');
+
+  // R4: two sources with the same folder name and the same handle twice
+  const parentA = await fresh('drive-a');
+  const parentB = await fresh('drive-b');
+  const docsA = await parentA.getDirectoryHandle('Docs', { create: true });
+  const docsB = await parentB.getDirectoryHandle('Docs', { create: true });
+  await writeFile(docsA, 'note.txt', 'from drive A');
+  await writeFile(docsB, 'note.txt', 'from drive B');
+  const nameDst = await fresh('name-dst');
+  const nameRun = await runBackup({
+    sources: [
+      { kind: 'handle', handle: docsA },
+      { kind: 'handle', handle: docsA }, // same folder again → skipped
+      { kind: 'handle', handle: docsB },
+      { kind: 'files', name: 'Docs', files: [{ path: 'Docs/note.txt', file: new File(['from list'], 'note.txt') }] },
+    ],
+    dest: nameDst,
+    taskName: 'names',
+  });
+  if (nameRun.fileCount !== 3) throw new Error(`R4: expected 3 files, got ${nameRun.fileCount}`);
+  const nameRepo = await openRepo((await findRepos(nameDst))[0].handle);
+  const nameOut = await fresh('name-out');
+  await runRestore({ repo: nameRepo, manifestName: (await listManifests(nameRepo))[0], target: nameOut });
+  const names = await treeText(nameOut);
+  if (
+    names.get('Docs/note.txt') !== 'from drive A' ||
+    names.get('Docs (2)/note.txt') !== 'from drive B' ||
+    names.get('Docs (3)/note.txt') !== 'from list'
+  ) {
+    throw new Error(`R4: unexpected restore layout ${JSON.stringify([...names])}`);
+  }
+  t('R4 same-named sources kept apart, duplicate folder skipped');
+
+  // R5: malicious manifest (unencrypted repo) — traversal paths rejected
+  // before anything is written
+  const evilDst = await fresh('evil-dst');
+  const evilSrc = await fresh('evil-src');
+  await writeFile(evilSrc, 'x.txt', 'payload');
+  await runBackup({ sources: [{ kind: 'handle', handle: evilSrc }], dest: evilDst, taskName: 'evil' });
+  const evilRepoDir = (await findRepos(evilDst))[0].handle;
+  const evilRepo = await openRepo(evilRepoDir);
+  const [evilName] = await listManifests(evilRepo);
+  const evilManifest = JSON.parse(new TextDecoder().decode(await readFile(evilRepo.manifests, evilName)));
+  for (const bad of ['../escape.txt', 'a/../../escape.txt', '/abs.txt', 'C:/win.txt', 'a\\..\\b.txt', 'a//b.txt']) {
+    const tampered = { ...evilManifest, files: [{ ...evilManifest.files[0], path: bad }] };
+    await writeFile(evilRepo.manifests, 'manifest-9999-evil.json', JSON.stringify(tampered));
+    const out = await fresh('evil-out');
+    await expectEngineError('manifest-invalid', () =>
+      runRestore({ repo: evilRepo, manifestName: 'manifest-9999-evil.json', target: out })
+    );
+    for await (const _ of out.keys()) throw new Error(`R5: restore wrote files for path ${bad}`);
+  }
+  await evilRepo.manifests.removeEntry('manifest-9999-evil.json');
+  t('R5 traversal paths in manifests rejected');
+
+  // R6: a swapped/damaged block is detected on restore; the damaged file is
+  // skipped (no partial file), the healthy one is still restored
+  await writeFile(evilSrc, 'y.txt', 'second healthy file');
+  await runBackup({ sources: [{ kind: 'handle', handle: evilSrc }], dest: evilDst, taskName: 'evil' });
+  const [latest] = await listManifests(evilRepo);
+  const m = JSON.parse(new TextDecoder().decode(await readFile(evilRepo.manifests, latest)));
+  const victim = m.files.find((f: { path: string }) => f.path.endsWith('x.txt'));
+  const hash: string = victim.chunks[0];
+  const blockDir = await evilRepo.blocks.getDirectoryHandle(hash.slice(0, 2));
+  await writeFile(blockDir, hash, await gzip(new TextEncoder().encode('evil').buffer as ArrayBuffer));
+  const corruptOut = await fresh('corrupt-out');
+  const partial = await runRestore({ repo: evilRepo, manifestName: latest, target: corruptOut });
+  const restoredTexts = await treeText(corruptOut);
+  if (
+    partial.failed.length !== 1 ||
+    !partial.failed[0].path.endsWith('x.txt') ||
+    partial.fileCount !== 1 ||
+    restoredTexts.size !== 1 ||
+    ![...restoredTexts.values()].includes('second healthy file')
+  ) {
+    throw new Error(`R6: failed=${JSON.stringify(partial.failed)} restored=${JSON.stringify([...restoredTexts])}`);
+  }
+  // a pre-existing file in the target keeps its content when restore fails
+  const keepDir = await getDirByPath(corruptOut, ['evil-src'], true);
+  await writeFile(keepDir, 'x.txt', 'user data');
+  await runRestore({ repo: evilRepo, manifestName: latest, target: corruptOut });
+  if ((await treeText(corruptOut)).get('evil-src/x.txt') !== 'user data') {
+    throw new Error('R6: failed restore clobbered an existing file');
+  }
+  // the verify sampler must catch the damaged block on the next backup
+  await expectEngineError('verify-failed', () =>
+    runBackup({ sources: [{ kind: 'handle', handle: evilSrc }], dest: evilDst, taskName: 'evil', verifySamples: 100 })
+  );
+  t('R6 damaged block detected (restore skips file, verify fails backup)');
+
+  // R7: encrypted repo — a planted plaintext manifest is not trusted, a
+  // damaged config is reported, absurd KDF parameters are refused
+  const keyRepoOpen = await openRepo(keyRepo, PASS);
+  await writeFile(keyRepoOpen.manifests, 'manifest-9999-plain.json', JSON.stringify(evilManifest));
+  await expectEngineError('manifest-invalid', () =>
+    runRestore({ repo: keyRepoOpen, manifestName: 'manifest-9999-plain.json', target: reg })
+  );
+  await keyRepoOpen.manifests.removeEntry('manifest-9999-plain.json');
+  const cfgRaw = await readFile(keyRepo, 'ab-repo.json');
+  const cfg = JSON.parse(new TextDecoder().decode(cfgRaw));
+  await writeFile(keyRepo, 'ab-repo.json', JSON.stringify({ ...cfg, kdf: { ...cfg.kdf, iterations: 1e12 } }));
+  await expectEngineError('repo-invalid', () => openRepo(keyRepo, PASS));
+  await writeFile(keyRepo, 'ab-repo.json', '{not json');
+  await expectEngineError('repo-invalid', () => openRepo(keyRepo, PASS));
+  await writeFile(keyRepo, 'ab-repo.json', cfgRaw);
+  await openRepo(keyRepo, PASS);
+  t('R7 tampered config / planted manifest rejected');
+
+  // R8: tar import — zip-slip entries stay inside the target, backslash
+  // paths become folders, garbage and truncated archives fail cleanly
+  const slip = buildTar([
+    { path: '../../outside.txt', data: new TextEncoder().encode('a').buffer as ArrayBuffer },
+    { path: 'win\\dir\\file.txt', data: new TextEncoder().encode('b').buffer as ArrayBuffer },
+  ]);
+  const slipOut = await fresh('slip-out');
+  await untarToDirectory(slip, slipOut);
+  const slipTree = await treeText(slipOut);
+  if (slipTree.get('outside.txt') !== 'a' || slipTree.get('win/dir/file.txt') !== 'b' || slipTree.size !== 2) {
+    throw new Error(`R8: unexpected tar layout ${JSON.stringify([...slipTree])}`);
+  }
+  // long / multibyte paths (> 255 bytes, > 100-byte names) round-trip via pax
+  const longPath = `${'tief/'.repeat(40)}${'ü'.repeat(70)}-${'x'.repeat(60)}.txt`;
+  const longName = `kurz/${'ä'.repeat(80)}.md`;
+  const paxTar = buildTar([
+    { path: longPath, data: new TextEncoder().encode('long').buffer as ArrayBuffer },
+    { path: longName, data: new TextEncoder().encode('name').buffer as ArrayBuffer },
+    { path: 'short.txt', data: new TextEncoder().encode('short').buffer as ArrayBuffer },
+  ]);
+  const paxOut = await fresh('pax-out');
+  await untarToDirectory(paxTar, paxOut);
+  const paxTree = await treeText(paxOut);
+  if (paxTree.get(longPath) !== 'long' || paxTree.get(longName) !== 'name' || paxTree.get('short.txt') !== 'short' || paxTree.size !== 3) {
+    throw new Error(`R8: pax roundtrip failed ${JSON.stringify([...paxTree.keys()])}`);
+  }
+  let garbageRejected = false;
+  try {
+    await untarToDirectory(new Blob([new Uint8Array(1024).fill(65)]), await fresh('garbage-out'));
+  } catch {
+    garbageRejected = true;
+  }
+  let truncatedRejected = false;
+  try {
+    await untarToDirectory(slip.slice(0, 600), await fresh('trunc-out'));
+  } catch {
+    truncatedRejected = true;
+  }
+  if (!garbageRejected || !truncatedRejected) throw new Error('R8: invalid tar archive was accepted');
+  t('R8 tar zip-slip / garbage / truncation handled');
+
+  // R9: content addressing sanity — block names are SHA-256 of plaintext
+  if ((await sha256Hex(new ArrayBuffer(0))) !== 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855') {
+    throw new Error('R9: sha256 mismatch');
+  }
+
+  await opfs.removeEntry('ab-reg', { recursive: true }).catch(() => {});
+}
+
 export async function abSelfTest(log: Log = (l) => console.log(l)): Promise<boolean> {
   const t = (m: string) => log(`[ABTEST] ${m}`);
   try {
     const opfs = await navigator.storage.getDirectory();
-    for (const name of ['ab-src', 'ab-dst', 'ab-dst2', 'ab-restore', 'ab-restore2', 'ab-import']) {
+    for (const name of ['ab-src', 'ab-dst', 'ab-dst2', 'ab-restore', 'ab-restore2', 'ab-import', 'ab-reg']) {
       await opfs.removeEntry(name, { recursive: true }).catch(() => {});
     }
     const src = await opfs.getDirectoryHandle('ab-src', { create: true });
@@ -159,6 +399,8 @@ export async function abSelfTest(log: Log = (l) => console.log(l)): Promise<bool
     await runRestore({ repo: repoFromTar, manifestName: tarManifests[0], target: restore2 });
     await assertTreesEqual(src, await restore2.getDirectoryHandle('ab-src'));
     t(`tar roundtrip OK (${count} entries, restore byte-identical)`);
+
+    await regressionTests(opfs, t);
 
     t('PASS — engine end-to-end OK');
     return true;

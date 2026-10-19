@@ -13,7 +13,8 @@ export const REPO_CONFIG_FILE = 'ab-repo.json';
 export const BLOCKS_DIR = 'blocks';
 export const MANIFESTS_DIR = 'manifests';
 export const DEFAULT_CHUNK_SIZE = 4 * 1024 * 1024;
-export const PBKDF2_ITERATIONS = 310_000;
+// new repositories; existing ones keep the count stored in ab-repo.json
+export const PBKDF2_ITERATIONS = 600_000;
 
 export interface RepoConfig {
   format: 1;
@@ -56,6 +57,8 @@ export interface RunSummary {
   verifiedOk: boolean;
   durationMs: number;
   encrypted: boolean;
+  /** Set when the run failed; the other counters are then 0. */
+  error?: string;
 }
 
 export interface BackupTask {
@@ -67,13 +70,19 @@ export interface BackupTask {
   sources: FileSystemDirectoryHandle[];
   dest: FileSystemDirectoryHandle | null;
   lastRun: RunSummary | null;
+  /**
+   * Repository folder below allbacked/, pinned on the first successful run
+   * so renaming the task does not start a new repository. Absent on tasks
+   * that never ran (then slugify(name) is used).
+   */
+  repoSlug?: string;
 }
 
 export type ProgressPhase =
   | 'scan'
   | 'backup'
-  | 'manifest'
   | 'verify'
+  | 'manifest'
   | 'restore'
   | 'done';
 
@@ -99,7 +108,10 @@ export class EngineError extends Error {
       | 'repo-unencrypted'
       | 'not-a-repo'
       | 'verify-failed'
-      | 'permission-denied',
+      | 'permission-denied'
+      | 'repo-invalid'
+      | 'manifest-invalid'
+      | 'block-corrupt',
     message: string
   ) {
     super(message);

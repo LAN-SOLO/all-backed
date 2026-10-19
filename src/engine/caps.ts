@@ -24,6 +24,38 @@ export async function opfsScratch(name: string): Promise<FileSystemDirectoryHand
   return opfs.getDirectoryHandle(name, { create: true });
 }
 
+/** Scratch folders that may hold decrypted or imported data. */
+export const SCRATCH_DIRS = ['restore-import', 'restore-out'] as const;
+const SCRATCH_LOCK = 'ab-scratch';
+
+/**
+ * Run `work` while holding the scratch lock, so a second app tab cannot wipe
+ * the scratch area mid-restore.
+ */
+export async function withScratchLock<T>(work: () => Promise<T>): Promise<T> {
+  if (!navigator.locks) return work();
+  return navigator.locks.request(SCRATCH_LOCK, work);
+}
+
+/**
+ * Archive mode leaves the last import (and the decrypted restore result) in
+ * OPFS so the download can finish. Wipe it on the next app start — restored
+ * plaintext must not linger in browser storage.
+ */
+export async function cleanupScratch(): Promise<void> {
+  if (!navigator.storage?.getDirectory) return;
+  const wipe = async () => {
+    const opfs = await navigator.storage.getDirectory();
+    for (const name of SCRATCH_DIRS) {
+      await opfs.removeEntry(name, { recursive: true }).catch(() => {});
+    }
+  };
+  if (!navigator.locks) return wipe();
+  await navigator.locks.request(SCRATCH_LOCK, { ifAvailable: true }, async (lock) => {
+    if (lock) await wipe();
+  });
+}
+
 export function downloadBlob(blob: Blob, filename: string): void {
   if (import.meta.env.DEV) {
     // test hook: lets the E2E driver grab exports without touching ~/Downloads
