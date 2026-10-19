@@ -4,6 +4,19 @@
 const api = globalThis.browser ?? globalThis.chrome;
 
 async function findAppTab(url) {
+  // Chrome 116+: runtime.getContexts lists our own tab pages with tab and
+  // window ids — no "tabs" permission needed, no URL guessing
+  if (typeof api.runtime.getContexts === 'function') {
+    try {
+      const contexts = await api.runtime.getContexts({ contextTypes: ['TAB'] });
+      const own = contexts.find(
+        (ctx) => typeof ctx.documentUrl === 'string' && ctx.documentUrl.startsWith(url) && ctx.tabId >= 0
+      );
+      if (own) return { id: own.tabId, windowId: own.windowId >= 0 ? own.windowId : undefined };
+    } catch {
+      // fall through to tabs.query
+    }
+  }
   try {
     const tabs = await api.tabs.query({ url });
     // Without the "tabs" permission a browser may ignore the url filter or
