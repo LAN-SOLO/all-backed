@@ -132,7 +132,10 @@ export default function App() {
       {/* Sidebar */}
       <aside className="flex w-80 shrink-0 flex-col border-r border-slate-700/60 light:border-slate-300 bg-slate-950/60 light:bg-white/70">
         <div className="border-b border-slate-700/60 light:border-slate-300 p-4">
-          <div className="text-2xl font-bold tracking-tight text-primary-400 light:text-primary-700">all backed.</div>
+          <div className="text-2xl font-bold tracking-tight">
+            <span className="text-primary-400 light:text-primary-700">all/backed</span>
+            <span className="text-slate-100 light:text-slate-900">.</span>
+          </div>
           <div className="mt-1 text-xs text-slate-500 light:text-slate-600">{t('tagline')}</div>
         </div>
         <div className="flex-1 overflow-y-auto p-3">

@@ -1,10 +1,11 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
-import { BackupTask, EngineError, Progress, REPO_DIR, RunSummary, slugify } from '../engine/types';
+import { BackupTask, Progress, REPO_DIR, RunSummary, slugify } from '../engine/types';
 import { SourceDir, runBackup } from '../engine/backup';
 import { ensurePermission, getDirByPath, walkFiles } from '../engine/fsx';
 import { downloadBlob, opfsRepoContainer, supportsFsAccess } from '../engine/caps';
 import { tarDirectory } from '../engine/tar';
 import { Lang, makeT } from '../i18n';
+import { errorMessage } from '../errors';
 
 interface Props {
   task: BackupTask;
@@ -155,7 +156,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
     (async () => {
       for (const [index, handle] of task.sources.entries()) {
         const key = `${index}:${handle.name}`;
-        if (handleStats[key]) continue;
+        if (handleStats[key] && handleStats[key].files >= 0) continue;
         let files = 0;
         let bytes = 0;
         try {
@@ -164,7 +165,10 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
             bytes += (await item.handle.getFile()).size;
           }
         } catch {
-          /* permission not granted yet — stats stay unknown */
+          // no read permission yet (e.g. after a browser restart) — it is
+          // requested on the next run; show that instead of "scanning…"
+          if (cancelled) return;
+          setHandleStats((prev) => ({ ...prev, [key]: { files: -1, bytes: 0 } }));
           continue;
         }
         if (cancelled) return;
@@ -174,20 +178,35 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
     return () => {
       cancelled = true;
     };
+    // re-run after a backup: the run may just have granted read access
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task.sources]);
+  }, [task.sources, task.lastRun]);
 
   const addSource = async () => {
     if (!supportsFsAccess) {
       fileInput.current?.click();
       return;
     }
+    let handle: FileSystemDirectoryHandle;
     try {
-      const handle = await window.showDirectoryPicker({ id: `ab-source-${task.id}`, mode: 'read' });
-      await onChange({ ...task, sources: [...task.sources, handle] });
+      handle = await window.showDirectoryPicker({ id: `ab-source-${task.id}`, mode: 'read' });
     } catch {
-      /* picker cancelled */
+      return; // picker cancelled
     }
+    if (await isKnownSource(handle)) {
+      setError(t('errDuplicateSource'));
+      return;
+    }
+    setError(null);
+    await onChange({ ...task, sources: [...task.sources, handle] });
+  };
+
+  // the same folder must not be listed twice (it would be backed up twice)
+  const isKnownSource = async (handle: FileSystemDirectoryHandle, extra: FileSystemDirectoryHandle[] = []) => {
+    for (const existing of [...task.sources, ...extra]) {
+      if (await existing.isSameEntry(handle).catch(() => false)) return true;
+    }
+    return false;
   };
 
   // combined source list: persisted directory handles first, then session
@@ -221,7 +240,9 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
       for (let i = 0; i < items.length; i++) {
         const handle = handles[i];
         if (handle?.kind === 'directory') {
-          newHandles.push(handle as FileSystemDirectoryHandle);
+          const dir = handle as FileSystemDirectoryHandle;
+          if (await isKnownSource(dir, newHandles)) setError(t('errDuplicateSource'));
+          else newHandles.push(dir);
           continue;
         }
         const entry = entries[i];
@@ -247,7 +268,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
         setFallbackSources((prev) => [...prev, ...newFallback]);
       }
     } catch (err) {
-      setError(`${t('errGeneric')} ${err instanceof Error ? err.message : String(err)}`);
+      setError(errorMessage(err, t));
     }
   };
 
@@ -319,6 +340,9 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
     }
     setRunning(true);
     setProgress(null);
+    const started = performance.now();
+    // pinned after the first successful run, so renaming keeps the repository
+    const repoSlug = task.repoSlug ?? slugify(task.name);
     try {
       let dest: FileSystemDirectoryHandle;
       if (supportsFsAccess) {
@@ -332,6 +356,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
         sources,
         dest,
         taskName: task.name,
+        repoSlug,
         passphrase: task.encrypt ? passphrase : undefined,
         onProgress: (p) => {
           const now = performance.now();
@@ -343,29 +368,31 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
       });
       let note: string | undefined;
       if (!supportsFsAccess) {
-        const repoRoot = await getDirByPath(dest, [REPO_DIR, slugify(task.name)], false);
+        const repoRoot = await getDirByPath(dest, [REPO_DIR, repoSlug], false);
         const archive = await tarDirectory(repoRoot);
         const stamp = new Date().toISOString().slice(0, 10);
-        downloadBlob(archive, `allbacked-${slugify(task.name)}-${stamp}.tar`);
+        downloadBlob(archive, `allbacked-${repoSlug}-${stamp}.tar`);
         note = `${t('exportedTar')} (${formatBytes(archive.size)})`;
       }
       setBanner({ ok: true, summary, note });
-      await onChange({ ...task, lastRun: summary });
+      await onChange({ ...task, repoSlug, lastRun: summary });
     } catch (err) {
-      let message: string;
-      if (err instanceof EngineError && err.code === 'passphrase-required') {
-        message = t('errPassphraseRequired');
-      } else if (err instanceof EngineError && err.code === 'passphrase-wrong') {
-        message = t('errPassphraseWrong');
-      } else if (
-        err instanceof DOMException &&
-        (err.name === 'QuotaExceededError' || err.name === 'UnknownError')
-      ) {
-        message = `${t('errQuota')}. ${t('errDirectHint')}`;
-      } else {
-        message = `${t('errGeneric')} ${err instanceof Error ? err.message : String(err)}`;
-      }
+      const message = errorMessage(err, t);
       setBanner({ ok: false, message });
+      // record the failure so the sidebar status dot turns red
+      const failedRun: RunSummary = {
+        finishedAt: new Date().toISOString(),
+        manifestName: '',
+        fileCount: 0,
+        totalBytes: 0,
+        newBlocks: 0,
+        dedupBlocks: 0,
+        verifiedOk: false,
+        durationMs: Math.round(performance.now() - started),
+        encrypted: task.encrypt,
+        error: message,
+      };
+      await onChange({ ...task, lastRun: failedRun }).catch(() => {});
     } finally {
       setRunning(false);
       setProgress(null);
@@ -377,6 +404,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
   runRef.current = run;
   const deleteRef = useRef(() => {});
   deleteRef.current = () => {
+    if (running) return; // never delete the task under a running backup
     if (confirmingDelete) {
       onDelete();
     } else {
@@ -444,11 +472,13 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
         <input
           className="input max-w-md text-lg font-bold"
           value={task.name}
+          disabled={running}
           aria-label={t('taskName')}
           onChange={(e) => onChange({ ...task, name: e.target.value })}
         />
         <button
           onClick={() => deleteRef.current()}
+          disabled={running}
           className={`btn-ghost ${confirmingDelete ? 'border-red-500/60 text-red-300 light:text-red-700' : 'text-red-400 light:text-red-700 hover:text-red-300 light:hover:text-red-700'}`}
         >
           {confirmingDelete ? t('confirmDelete') : t('deleteTask')}
@@ -541,7 +571,9 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
                   <span className="block truncate font-semibold text-slate-100 light:text-slate-900">{row.name}</span>
                   <span className="block text-xs text-slate-500 light:text-slate-600">
                     {row.stats
-                      ? `${row.stats.files} ${t('files')} · ${formatBytes(row.stats.bytes)}`
+                      ? row.stats.files < 0
+                        ? t('statsLocked')
+                        : `${row.stats.files} ${t('files')} · ${formatBytes(row.stats.bytes)}`
                       : t('scanningStats')}
                   </span>
                 </span>
@@ -669,6 +701,12 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
       {task.lastRun && !running && !banner && (
         <div className="card p-5">
           <div className="mb-2 text-xs uppercase tracking-widest text-slate-500 light:text-slate-600">{t('lastRun')}</div>
+          {task.lastRun.error ? (
+            <div className="text-sm text-slate-300 light:text-slate-700">
+              {new Date(task.lastRun.finishedAt).toLocaleString(lang)} —{' '}
+              <span className="text-red-400 light:text-red-700">{t('lastRunFailed')}</span>: {task.lastRun.error}
+            </div>
+          ) : (
           <div className="text-sm text-slate-300 light:text-slate-700">
             {new Date(task.lastRun.finishedAt).toLocaleString(lang)} — {task.lastRun.fileCount}{' '}
             {t('files')}, {formatBytes(task.lastRun.totalBytes)}, {task.lastRun.newBlocks}{' '}
@@ -679,6 +717,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
             {' · '}
             {formatDuration(task.lastRun.durationMs)}
           </div>
+          )}
         </div>
       )}
     </div>

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { EngineError, Progress } from '../engine/types';
 import { OpenRepo, findRepos, listManifests, openRepo, readManifest } from '../engine/repo';
-import { runRestore } from '../engine/restore';
-import { downloadBlob, opfsScratch, supportsFsAccess } from '../engine/caps';
+import { RestoreFailure, runRestore } from '../engine/restore';
+import { downloadBlob, opfsScratch, supportsFsAccess, withScratchLock } from '../engine/caps';
 import { tarDirectory, untarToDirectory } from '../engine/tar';
 import { Lang, makeT } from '../i18n';
+import { errorMessage } from '../errors';
 
 interface Props {
   lang: Lang;
@@ -27,6 +28,7 @@ export default function RestoreView({ lang }: Props) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [failures, setFailures] = useState<RestoreFailure[]>([]);
   const tarInput = useRef<HTMLInputElement>(null);
 
   const reset = () => {
@@ -38,13 +40,19 @@ export default function RestoreView({ lang }: Props) {
     setProgress(null);
     setDoneMsg(null);
     setError(null);
+    setFailures([]);
   };
 
   const scanDir = async (dir: FileSystemDirectoryHandle) => {
     reset();
-    const found = await findRepos(dir);
-    setRepos(found);
-    if (found.length === 1) await selectRepo(found[0]);
+    try {
+      const found = await findRepos(dir);
+      setRepos(found);
+      if (found.length === 1) await selectRepo(found[0]);
+    } catch (err) {
+      setRepos(null);
+      setError(errorMessage(err, t));
+    }
   };
 
   const pickRepoDir = async () => {
@@ -52,21 +60,32 @@ export default function RestoreView({ lang }: Props) {
       tarInput.current?.click();
       return;
     }
+    let dir: FileSystemDirectoryHandle;
     try {
-      const dir = await window.showDirectoryPicker({ id: 'ab-restore-repo', mode: 'read' });
-      await scanDir(dir);
+      dir = await window.showDirectoryPicker({ id: 'ab-restore-repo', mode: 'read' });
     } catch {
-      /* picker cancelled */
+      return; // picker cancelled
     }
+    await scanDir(dir);
   };
 
   const importTar = async (archive: Blob) => {
+    if (running) return;
+    setRunning(true);
     try {
-      const scratch = await opfsScratch('restore-import');
-      await untarToDirectory(archive, scratch);
+      const scratch = await withScratchLock(async () => {
+        const dir = await opfsScratch('restore-import');
+        await untarToDirectory(archive, dir);
+        return dir;
+      });
       await scanDir(scratch);
     } catch (err) {
-      setError(`${t('errGeneric')} ${err instanceof Error ? err.message : String(err)}`);
+      reset();
+      setRepos(null);
+      setError(errorMessage(err, t));
+    } finally {
+      setRunning(false);
+      if (tarInput.current) tarInput.current.value = '';
     }
   };
 
@@ -110,54 +129,53 @@ export default function RestoreView({ lang }: Props) {
         setOpen(null);
         setError(t('errPassphraseWrong'));
       } else {
-        setError(`${t('errGeneric')} ${err instanceof Error ? err.message : String(err)}`);
+        setError(errorMessage(err, t));
       }
     }
   };
 
   const restore = async (manifestName: string) => {
-    if (!open) return;
+    if (!open || running) return;
     setError(null);
     setDoneMsg(null);
+    setFailures([]);
     try {
-      let target: FileSystemDirectoryHandle;
+      let target: FileSystemDirectoryHandle | null = null;
       if (supportsFsAccess) {
-        target = await window.showDirectoryPicker({ id: 'ab-restore-target', mode: 'readwrite' });
-      } else {
-        target = await opfsScratch('restore-out');
+        try {
+          target = await window.showDirectoryPicker({ id: 'ab-restore-target', mode: 'readwrite' });
+        } catch {
+          return; // picker cancelled
+        }
       }
       setRunning(true);
-      const result = await runRestore({
-        repo: open,
-        manifestName,
-        target,
-        onProgress: setProgress,
+      await withScratchLock(async () => {
+        const dest = target ?? (await opfsScratch('restore-out'));
+        const result = await runRestore({
+          repo: open,
+          manifestName,
+          target: dest,
+          onProgress: setProgress,
+        });
+        setFailures(result.failed);
+        if (supportsFsAccess) {
+          setDoneMsg(
+            `${t('restored')}: ${result.fileCount} ${t('files')} → ${dest.name} (${(
+              result.durationMs / 1000
+            ).toFixed(1)}s)`
+          );
+        } else {
+          const archive = await tarDirectory(dest);
+          const stamp = new Date().toISOString().slice(0, 10);
+          downloadBlob(archive, `restored-${stamp}.tar`);
+          setDoneMsg(`${t('restored')}: ${result.fileCount} ${t('files')} — ${t('restoredTarHint')}`);
+        }
       });
-      if (supportsFsAccess) {
-        setDoneMsg(
-          `${t('restored')}: ${result.fileCount} ${t('files')} → ${target.name} (${(
-            result.durationMs / 1000
-          ).toFixed(1)}s)`
-        );
-      } else {
-        const archive = await tarDirectory(target);
-        const stamp = new Date().toISOString().slice(0, 10);
-        downloadBlob(archive, `restored-${stamp}.tar`);
-        setDoneMsg(`${t('restored')}: ${result.fileCount} ${t('files')} — ${t('restoredTarHint')}`);
-      }
     } catch (err) {
-      if (err instanceof EngineError && err.code === 'passphrase-wrong') {
-        setError(t('errPassphraseWrong'));
-      } else if (
-        err instanceof DOMException &&
-        (err.name === 'QuotaExceededError' || err.name === 'UnknownError')
-      ) {
-        setError(`${t('errQuota')}. ${t('errDirectHint')}`);
-      } else if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        setError(`${t('errGeneric')} ${err instanceof Error ? err.message : String(err)}`);
-      }
+      setError(errorMessage(err, t));
     } finally {
       setRunning(false);
+      setProgress(null);
     }
   };
 
@@ -259,6 +277,21 @@ export default function RestoreView({ lang }: Props) {
       )}
 
       {doneMsg && <div className="card border-emerald-500/50 p-4 text-sm text-emerald-300 light:text-emerald-700">{doneMsg}</div>}
+      {failures.length > 0 && (
+        <div className="card border-amber-500/50 p-4 text-sm text-amber-300 light:text-amber-800" role="alert">
+          <div className="mb-2 font-semibold">
+            {failures.length} {t('restoreFailedSome')}:
+          </div>
+          <ul className="max-h-48 space-y-1 overflow-y-auto text-xs">
+            {failures.slice(0, 200).map((f, i) => (
+              <li key={i} className="break-all">
+                <span className="text-slate-500 light:text-slate-600">└─</span> {f.path} — {f.reason}
+              </li>
+            ))}
+            {failures.length > 200 && <li>…</li>}
+          </ul>
+        </div>
+      )}
       {error && (
         <div className="card border-red-500/50 p-4 text-sm text-red-300 light:text-red-700" role="alert">
           {error}

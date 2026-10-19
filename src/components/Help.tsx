@@ -49,10 +49,10 @@ const de: Content = {
   },
   tutorial: [
     {
-      title: 'Willkommen bei all backed.',
+      title: 'Willkommen bei all/backed.',
       body: [
         '$ allbacked --free --local --encrypted',
-        'all backed sichert Ihre Ordner direkt aus dem Browser — lokal, auf Wunsch verschlüsselt, ohne Konto und ohne Cloud.',
+        'all/backed sichert Ihre Ordner direkt aus dem Browser — lokal, auf Wunsch verschlüsselt, ohne Konto und ohne Cloud.',
         'Dieses Tutorial dauert zwei Minuten. Sie finden es jederzeit wieder: F1 oder der ?-Knopf unten links.',
         'Blättern mit den Pfeiltasten ← →, Schließen mit Esc.',
       ],
@@ -63,14 +63,14 @@ const de: Content = {
         'Ein Backup ist eine Aufgabe: ein Name, eine oder mehrere Quellen, ein Ziel.',
         '• F2 oder „+ Neue Aufgabe“ in der Seitenleiste legt eine Aufgabe an.',
         '• Quellen: „+ Ordner hinzufügen“ öffnet die Ordnerauswahl — oder Sie ziehen Ordner per Drag & Drop auf die Quellen-Karte.',
-        'Mehrere Quellen sind erlaubt und werden in einem Lauf zusammen gesichert. Zu jeder Quelle zeigt all backed Dateizahl und Größe.',
+        'Mehrere Quellen sind erlaubt und werden in einem Lauf zusammen gesichert. Zu jeder Quelle zeigt all/backed Dateizahl und Größe.',
       ],
     },
     {
       title: 'Das Ziel — je nach Browser',
       body: [
-        'In Chrome wählen Sie einen echten Zielordner — auch auf einer externen Platte. all backed schreibt direkt hinein.',
-        'Safari und Firefox erlauben kein direktes Schreiben in Ordner. Dort bereitet all backed das Backup im Browser-Speicher vor und lädt es als .tar-Archiv herunter — bewahren Sie dieses Archiv auf Ihrem Ziel-Laufwerk auf.',
+        'In Chrome wählen Sie einen echten Zielordner — auch auf einer externen Platte. all/backed schreibt direkt hinein.',
+        'Safari und Firefox erlauben kein direktes Schreiben in Ordner. Dort bereitet all/backed das Backup im Browser-Speicher vor und lädt es als .tar-Archiv herunter — bewahren Sie dieses Archiv auf Ihrem Ziel-Laufwerk auf.',
         'Der Unterschied ist nur der Weg: Der Inhalt des Backups ist derselbe.',
       ],
     },
@@ -86,7 +86,7 @@ const de: Content = {
       body: [
         'F5 oder der Start-Knopf unten rechts führt die Aufgabe aus. Das Terminal-Protokoll zeigt Phase, Fortschrittsbalken, Dateien und Blöcke live.',
         'Bereits gesicherte Datenblöcke werden dedupliziert — der zweite Lauf ist darum deutlich kleiner und schneller als der erste.',
-        'Nach jedem Lauf liest all backed eine Stichprobe der geschriebenen Blöcke zurück und prüft ihre Prüfsummen. Das Ergebnis steht im Abschluss-Banner: Verify OK.',
+        'Nach jedem Lauf liest all/backed eine Stichprobe der geschriebenen Blöcke zurück und prüft ihre Prüfsummen. Das Ergebnis steht im Abschluss-Banner: Verify OK.',
       ],
     },
     {
@@ -103,24 +103,26 @@ const de: Content = {
       id: 'tasks',
       title: 'Aufgaben & Quellen',
       body: [
-        'Jede Aufgabe bündelt Quellen, Ziel und Verschlüsselung. Der Name ist frei wählbar und benennt auch den Backup-Ordner im Ziel.',
+        'Jede Aufgabe bündelt Quellen, Ziel und Verschlüsselung. Der Name ist frei wählbar; beim ersten erfolgreichen Lauf benennt er den Backup-Ordner im Ziel (allbacked/<name>). Spätere Umbenennungen ändern nur die Anzeige — gesichert wird weiter in denselben Ordner.',
         '• Anlegen: F2 oder „+ Neue Aufgabe“ · Löschen: F8 oder „Aufgabe löschen“ (zur Sicherheit zweimal klicken)',
         '• Quellen hinzufügen: „+ Ordner hinzufügen“ (Ordnerauswahl) oder Ordner per Drag & Drop auf die Quellen-Karte ziehen',
         '• Quelle entfernen: [entfernen] neben dem Eintrag',
-        'Zu jeder Quelle zeigt all backed Dateizahl und Gesamtgröße; mehrere Quellen werden in einem Lauf zusammen gesichert.',
+        'Zu jeder Quelle zeigt all/backed Dateizahl und Gesamtgröße; mehrere Quellen werden in einem Lauf zusammen gesichert. Derselbe Ordner lässt sich nicht doppelt hinzufügen. Haben zwei Quellen denselben Namen (z. B. zweimal „Dokumente“ von verschiedenen Laufwerken), landet die zweite im Backup als „Dokumente (2)“ — nichts wird überschrieben.',
         'Im Archiv-Modus (Safari/Firefox) gelten hinzugefügte Quellen für die laufende Sitzung — nach einem Neuladen wählen Sie sie neu.',
-        'Der Statuspunkt in der Seitenleiste zeigt den letzten Lauf: grün = Verify OK, rot = fehlgeschlagen, leerer Ring = noch nie gesichert.',
+        'Der Statuspunkt in der Seitenleiste zeigt den letzten Lauf: grün = Verify OK, rot = fehlgeschlagen (der Grund steht in der Karte „Letzter Lauf“), leerer Ring = noch nie gesichert.',
+        'Während ein Backup läuft, sind Name, Quellen, Ziel und Löschen gesperrt.',
       ],
     },
     {
       id: 'dest',
       title: 'Ziel & Browser-Unterschiede',
       body: [
-        'In Chrome nutzt all backed die File System Access API: Sie wählen den Zielordner einmal, das Backup wird direkt hineingeschrieben — auch auf externe Laufwerke.',
+        'In Chrome nutzt all/backed die File System Access API: Sie wählen den Zielordner einmal, das Backup wird direkt hineingeschrieben — auch auf externe Laufwerke.',
         'Safari und Firefox bieten diese API nicht. Dort läuft der Archiv-Modus: Das Backup wird im Browser-Speicher aufgebaut und anschließend als .tar-Archiv heruntergeladen (allbacked-<aufgabe>-<datum>.tar).',
-        'Vor einem Archiv-Backup prüft all backed den freien Browser-Speicher. Reicht er nicht, stoppt der Lauf mit einer „benötigt / frei“-Angabe, bevor etwas geschrieben wird.',
+        'Vor einem Archiv-Backup prüft all/backed den freien Browser-Speicher. Reicht er nicht, stoppt der Lauf mit einer „benötigt / frei“-Angabe, bevor etwas geschrieben wird.',
         'Meldet der Browser mitten im Lauf „QuotaExceeded“, ist der Browser-Speicher voll — Platz schaffen oder in Chrome direkt in einen Ordner sichern.',
         'Hinweis: Der Ordner-Dialog des Browsers heißt teils „Hochladen“ — hochgeladen wird nichts, alle Daten bleiben auf diesem Gerät.',
+        'Nach einem Browser-Neustart fragt Chrome beim nächsten Lauf erneut, ob all/backed auf die gewählten Ordner zugreifen darf (bis dahin steht bei der Quelle „Zugriff wird beim nächsten Lauf angefragt“). Bei mehreren Ordnern kann eine Rückfrage pro Ordner kommen — erscheint „Zugriff verweigert“, einfach erneut auf Start klicken.',
       ],
     },
     {
@@ -128,9 +130,10 @@ const de: Content = {
       title: 'Verschlüsselung',
       body: [
         'Mit „Backup verschlüsseln“ werden alle Datenblöcke und Versionslisten mit AES-256-GCM verschlüsselt — per WebCrypto, direkt im Browser.',
-        'Der Schlüssel wird per PBKDF2 (SHA-256, 310.000 Iterationen) aus Ihrer Passphrase abgeleitet. Passphrase und Schlüssel verlassen das Gerät nie und werden nirgends gespeichert.',
+        'Der Schlüssel wird per PBKDF2 (SHA-256, 600.000 Iterationen bei neuen Backups; ältere behalten ihre gespeicherten 310.000) aus Ihrer Passphrase abgeleitet. Passphrase und Schlüssel verlassen das Gerät nie und werden nirgends gespeichert.',
         'Daraus folgt: Ohne Passphrase keine Wiederherstellung. Kein Reset, keine Hintertür. Notieren Sie die Passphrase an einem sicheren Ort.',
         'Ob ein Backup-Ordner verschlüsselt ist, wird beim ersten Lauf festgelegt und gilt für alle weiteren Versionen dieser Aufgabe.',
+        'Vor jedem weiteren Lauf prüft all/backed die Passphrase gegen die vorhandenen Daten. Eine abweichende Passphrase bricht den Lauf ab, bevor etwas geschrieben wird — so kann kein Backup mit zwei verschiedenen Schlüsseln entstehen.',
       ],
     },
     {
@@ -138,10 +141,11 @@ const de: Content = {
       title: 'Backup ausführen',
       body: [
         'Start: F5 oder der Start-Knopf in der Fußleiste.',
-        'Phasen: scanne Quellen → sichere → schreibe Manifest → prüfe → fertig. Das Terminal-Protokoll zeigt die aktuelle Datei, den Fortschrittsbalken und die Blockzähler live.',
+        'Phasen: scanne Quellen → sichere → prüfe → schreibe Manifest → fertig. Das Terminal-Protokoll zeigt die aktuelle Datei, den Fortschrittsbalken und die Blockzähler live.',
         'Danach fasst ein Banner den Lauf zusammen: Abschlusszeit, Dauer, Dateien, neue und deduplizierte Blöcke, Verify-Ergebnis. Im Archiv-Modus startet zusätzlich der Download des .tar-Archivs.',
         'Der letzte Lauf bleibt sichtbar — als Karte in der Detailansicht und als Statuspunkt in der Seitenleiste.',
-        'Schlägt ein Lauf fehl, bleiben frühere Versionen unverändert und weiterhin wiederherstellbar.',
+        'Schlägt ein Lauf fehl, bleiben frühere Versionen unverändert und weiterhin wiederherstellbar. Die neue Version erscheint erst, wenn die Prüfung bestanden ist.',
+        'Gesichert werden Dateien mit Inhalt und relativem Pfad. Leere Ordner, Dateirechte und Änderungszeiten werden beim Wiederherstellen nicht nachgebildet.',
       ],
     },
     {
@@ -149,21 +153,22 @@ const de: Content = {
       title: 'Wiederherstellen',
       body: [
         '„Wiederherstellen“ in der Seitenleiste oder F6 öffnet die Ansicht.',
-        'In Chrome wählen Sie den Backup-Zielordner — den Ordner, der das Verzeichnis „allbacked“ enthält. all backed durchsucht ihn und listet alle gefundenen Backups auf (eines je Aufgabe).',
+        'In Chrome wählen Sie den Backup-Zielordner — den Ordner, der das Verzeichnis „allbacked“ enthält. all/backed durchsucht ihn und listet alle gefundenen Backups auf (eines je Aufgabe).',
         'Im Archiv-Modus wählen Sie stattdessen das heruntergeladene .tar-Archiv; es wird lokal entpackt und genauso durchsucht.',
         'Verschlüsselte Backups sind als „verschlüsselt“ markiert und fragen nach der Passphrase; sie wird sofort gegen die neueste Version geprüft.',
-        'Jeder Backup-Lauf erscheint als Version mit Zeitstempel. „Diese Version wiederherstellen“ fragt nach dem Zielordner und stellt die Dateien dorthin wieder her.',
-        'Im Archiv-Modus wird das Ergebnis als restored-<datum>.tar heruntergeladen — entpacken Sie es, um Ihre Dateien zu erhalten.',
+        'Jeder Backup-Lauf erscheint als Version mit Zeitstempel. „Diese Version wiederherstellen“ fragt nach dem Zielordner und stellt die Dateien dorthin wieder her. Gleichnamige Dateien im Zielordner werden überschrieben — am sichersten ist ein leerer Ordner.',
+        'Jeder Block wird beim Wiederherstellen gegen seine Prüfsumme geprüft. Lässt sich eine Datei nicht herstellen (beschädigter Block, auf diesem System unzulässiger Dateiname wie „a:b.txt“ unter Windows), wird sie übersprungen und unten aufgelistet; alle anderen Dateien werden trotzdem wiederhergestellt. Halbe Dateien entstehen nie.',
+        'Im Archiv-Modus wird das Ergebnis als restored-<datum>.tar heruntergeladen — entpacken Sie es, um Ihre Dateien zu erhalten. Die entpackten Zwischendaten im Browser-Speicher löscht all/backed beim nächsten Start.',
       ],
     },
     {
       id: 'dedup',
       title: 'Deduplizierung & Verify',
       body: [
-        'all backed zerlegt jede Datei in Blöcke von bis zu 4 MiB. Jeder Block wird über seine SHA-256-Prüfsumme identifiziert, komprimiert und — bei aktiver Verschlüsselung — verschlüsselt abgelegt.',
+        'all/backed zerlegt jede Datei in Blöcke von bis zu 4 MiB. Jeder Block wird über seine SHA-256-Prüfsumme identifiziert, komprimiert und — bei aktiver Verschlüsselung — verschlüsselt abgelegt.',
         'Ein Block, der schon im Backup liegt, wird nicht erneut gespeichert. Deshalb sind Folge-Backups klein und schnell: Nur Neues und Geändertes erzeugt neue Blöcke.',
         'Jeder Lauf schreibt ein Manifest — die Versionsliste: welche Dateien, aus welchen Blöcken, mit welchen Zeitstempeln. Ältere Versionen bleiben dadurch vollständig wiederherstellbar.',
-        'Zum Abschluss jedes Laufs liest all backed eine zufällige Stichprobe der Blöcke zurück, entpackt bzw. entschlüsselt sie und vergleicht die Prüfsumme. Erst wenn alles passt, meldet der Lauf „Verify OK“.',
+        'Zum Abschluss jedes Laufs liest all/backed eine zufällige Stichprobe der Blöcke zurück, entpackt bzw. entschlüsselt sie und vergleicht die Prüfsumme. Erst wenn alles passt, meldet der Lauf „Verify OK“.',
         'Im Ziel entsteht dafür die Struktur allbacked/<aufgabe>/ mit blocks/ und manifests/ — bitte nicht von Hand umsortieren.',
       ],
     },
@@ -184,7 +189,7 @@ const de: Content = {
       title: 'Sprache & Darstellung',
       body: [
         'Unten links in der Seitenleiste wechseln Sie zwischen EN und DE.',
-        'Beim ersten Start folgt all backed der Browser-Sprache; Ihre Wahl wird auf diesem Gerät gespeichert und bleibt erhalten.',
+        'Beim ersten Start folgt all/backed der Browser-Sprache; Ihre Wahl wird auf diesem Gerät gespeichert und bleibt erhalten.',
         'Daneben schalten Sie mit dem Sonnen-/Mond-Symbol zwischen Dunkel- und Hell-Modus um. Standard ist der dunkle Terminal-Look; auch diese Wahl bleibt auf diesem Gerät gespeichert.',
       ],
     },
@@ -200,7 +205,7 @@ const de: Content = {
       id: 'privacy',
       title: 'Privatsphäre',
       body: [
-        'all backed arbeitet vollständig lokal: kein Konto, keine Cloud, keine Telemetrie. Die App sendet nichts ins Netz.',
+        'all/backed arbeitet vollständig lokal: kein Konto, keine Cloud, keine Telemetrie. Die App sendet nichts ins Netz.',
         'Gesichert wird nur, was Sie ausdrücklich auswählen. Backups liegen dort, wo Sie sie ablegen — in Ihrem Zielordner oder im heruntergeladenen Archiv.',
         'Auch wenn ein Browser-Dialog „Hochladen“ sagt: Es wird nichts hochgeladen. Der Dialog stammt vom Browser, die Daten bleiben auf dem Gerät.',
         'Verschlüsselung passiert vor dem Schreiben, direkt im Browser — Details im Abschnitt „Verschlüsselung“.',
@@ -224,10 +229,10 @@ const en: Content = {
   },
   tutorial: [
     {
-      title: 'Welcome to all backed.',
+      title: 'Welcome to all/backed.',
       body: [
         '$ allbacked --free --local --encrypted',
-        'all backed backs up your folders straight from the browser — locally, encrypted if you like, with no account and no cloud.',
+        'all/backed backs up your folders straight from the browser — locally, encrypted if you like, with no account and no cloud.',
         'This tutorial takes two minutes. You can reopen it anytime: F1 or the ? button in the bottom left.',
         'Page with the arrow keys ← →, close with Esc.',
       ],
@@ -238,14 +243,14 @@ const en: Content = {
         'A backup is a task: a name, one or more sources, a destination.',
         '• F2 or “+ New task” in the sidebar creates a task.',
         '• Sources: “+ add folder” opens the folder picker — or drag folders onto the sources card.',
-        'Multiple sources are fine and are backed up together in one run. For each source, all backed shows file count and size.',
+        'Multiple sources are fine and are backed up together in one run. For each source, all/backed shows file count and size.',
       ],
     },
     {
       title: 'The destination — depends on your browser',
       body: [
-        'In Chrome you pick a real destination folder — an external drive works too. all backed writes straight into it.',
-        'Safari and Firefox don’t allow direct folder writes. There, all backed stages the backup in browser storage and downloads it as a .tar archive — keep that archive on your target drive.',
+        'In Chrome you pick a real destination folder — an external drive works too. all/backed writes straight into it.',
+        'Safari and Firefox don’t allow direct folder writes. There, all/backed stages the backup in browser storage and downloads it as a .tar archive — keep that archive on your target drive.',
         'Only the route differs: the backup content is the same.',
       ],
     },
@@ -261,7 +266,7 @@ const en: Content = {
       body: [
         'F5 or the Start button in the bottom right runs the task. The terminal log shows phase, progress bar, files and blocks live.',
         'Data blocks that are already backed up are deduplicated — which is why the second run is much smaller and faster than the first.',
-        'After every run, all backed reads back a sample of the written blocks and checks their checksums. The result appears in the completion banner: verify OK.',
+        'After every run, all/backed reads back a sample of the written blocks and checks their checksums. The result appears in the completion banner: verify OK.',
       ],
     },
     {
@@ -278,24 +283,26 @@ const en: Content = {
       id: 'tasks',
       title: 'Tasks & sources',
       body: [
-        'Each task bundles sources, destination and encryption. The name is yours to choose and also names the backup folder at the destination.',
+        'Each task bundles sources, destination and encryption. The name is yours to choose; on the first successful run it names the backup folder at the destination (allbacked/<name>). Renaming later only changes the label — backups keep going into the same folder.',
         '• Create: F2 or “+ New task” · Delete: F8 or “Delete task” (click twice, as a safeguard)',
         '• Add sources: “+ add folder” (folder picker) or drag & drop folders onto the sources card',
         '• Remove a source: [remove] next to the entry',
-        'For each source, all backed shows file count and total size; multiple sources are backed up together in one run.',
+        'For each source, all/backed shows file count and total size; multiple sources are backed up together in one run. The same folder cannot be added twice. If two sources share a name (e.g. two “Documents” folders from different drives), the second is stored as “Documents (2)” — nothing gets overwritten.',
         'In archive mode (Safari/Firefox), added sources apply to the current session — after a reload, pick them again.',
-        'The status dot in the sidebar reflects the last run: green = verify OK, red = failed, empty ring = never backed up.',
+        'The status dot in the sidebar reflects the last run: green = verify OK, red = failed (the reason is shown in the “Last run” card), empty ring = never backed up.',
+        'While a backup is running, name, sources, destination and delete are locked.',
       ],
     },
     {
       id: 'dest',
       title: 'Destination & browser differences',
       body: [
-        'In Chrome, all backed uses the File System Access API: you pick the destination folder once and the backup is written straight into it — external drives included.',
+        'In Chrome, all/backed uses the File System Access API: you pick the destination folder once and the backup is written straight into it — external drives included.',
         'Safari and Firefox don’t offer this API. There, archive mode kicks in: the backup is staged in browser storage and then downloaded as a .tar archive (allbacked-<task>-<date>.tar).',
-        'Before an archive-mode backup, all backed checks the free browser storage. If it won’t fit, the run stops with a “needed / free” message before anything is written.',
+        'Before an archive-mode backup, all/backed checks the free browser storage. If it won’t fit, the run stops with a “needed / free” message before anything is written.',
         'If the browser reports “QuotaExceeded” mid-run, browser storage is full — free up space, or back up straight into a folder in Chrome.',
         'Note: your browser’s folder dialog may say “Upload” — nothing is uploaded, all data stays on this device.',
+        'After a browser restart, Chrome asks again on the next run whether all/backed may access the chosen folders (until then the source shows “access is requested on the next run”). With several folders there may be one prompt per folder — if “access was denied” appears, simply click Start again.',
       ],
     },
     {
@@ -303,9 +310,10 @@ const en: Content = {
       title: 'Encryption',
       body: [
         'With “Encrypt backup” enabled, all data blocks and version lists are encrypted with AES-256-GCM — via WebCrypto, right in the browser.',
-        'The key is derived from your passphrase via PBKDF2 (SHA-256, 310,000 iterations). Passphrase and key never leave the device and are stored nowhere.',
+        'The key is derived from your passphrase via PBKDF2 (SHA-256, 600,000 iterations for new backups; older ones keep their stored 310,000). Passphrase and key never leave the device and are stored nowhere.',
         'Which means: no passphrase, no recovery. No reset, no backdoor. Write the passphrase down somewhere safe.',
         'Whether a backup folder is encrypted is fixed on the first run and applies to all further versions of that task.',
+        'Before every further run, all/backed checks the passphrase against the existing data. A different passphrase stops the run before anything is written — so a backup can never end up with two different keys.',
       ],
     },
     {
@@ -313,10 +321,11 @@ const en: Content = {
       title: 'Running a backup',
       body: [
         'Start: F5 or the Start button in the footer bar.',
-        'Phases: scanning sources → backing up → writing manifest → verifying → done. The terminal log shows the current file, the progress bar and the block counters live.',
+        'Phases: scanning sources → backing up → verifying → writing manifest → done. The terminal log shows the current file, the progress bar and the block counters live.',
         'Afterwards a banner sums up the run: completion time, duration, files, new and deduplicated blocks, verify result. In archive mode, the .tar archive download starts as well.',
         'The last run stays visible — as a card in the detail view and as the status dot in the sidebar.',
-        'If a run fails, earlier versions remain unchanged and restorable.',
+        'If a run fails, earlier versions remain unchanged and restorable. The new version only appears once verification has passed.',
+        'Backed up are files with their content and relative path. Empty folders, permissions and modification times are not recreated on restore.',
       ],
     },
     {
@@ -324,21 +333,22 @@ const en: Content = {
       title: 'Restoring',
       body: [
         '“Restore” in the sidebar or F6 opens the view.',
-        'In Chrome, pick your backup destination folder — the one containing the “allbacked” directory. all backed scans it and lists every backup it finds (one per task).',
+        'In Chrome, pick your backup destination folder — the one containing the “allbacked” directory. all/backed scans it and lists every backup it finds (one per task).',
         'In archive mode, pick the downloaded .tar archive instead; it is unpacked locally and scanned the same way.',
         'Encrypted backups are marked “encrypted” and ask for the passphrase; it is validated immediately against the newest version.',
-        'Every backup run appears as a version with a timestamp. “Restore this version” asks for a target folder and restores the files into it.',
-        'In archive mode, the result is downloaded as restored-<date>.tar — unpack it to get your files.',
+        'Every backup run appears as a version with a timestamp. “Restore this version” asks for a target folder and restores the files into it. Files with the same name in the target folder are overwritten — an empty folder is the safest choice.',
+        'Every block is checked against its checksum during restore. If a file cannot be restored (damaged block, a file name this system does not allow such as “a:b.txt” on Windows), it is skipped and listed below; all other files are still restored. Half-written files never remain.',
+        'In archive mode, the result is downloaded as restored-<date>.tar — unpack it to get your files. all/backed deletes the unpacked staging data in browser storage on its next start.',
       ],
     },
     {
       id: 'dedup',
       title: 'Deduplication & verify',
       body: [
-        'all backed splits every file into blocks of up to 4 MiB. Each block is identified by its SHA-256 checksum, compressed and — with encryption enabled — stored encrypted.',
+        'all/backed splits every file into blocks of up to 4 MiB. Each block is identified by its SHA-256 checksum, compressed and — with encryption enabled — stored encrypted.',
         'A block that already exists in the backup is not stored again. That’s why follow-up backups are small and fast: only new and changed data creates new blocks.',
         'Every run writes a manifest — the version list: which files, made of which blocks, with which timestamps. Older versions therefore remain fully restorable.',
-        'At the end of every run, all backed reads back a random sample of blocks, decompresses or decrypts them and compares the checksum. Only if everything matches does the run report “verify OK”.',
+        'At the end of every run, all/backed reads back a random sample of blocks, decompresses or decrypts them and compares the checksum. Only if everything matches does the run report “verify OK”.',
         'At the destination this creates the structure allbacked/<task>/ with blocks/ and manifests/ — please don’t reorganize it by hand.',
       ],
     },
@@ -359,7 +369,7 @@ const en: Content = {
       title: 'Language & appearance',
       body: [
         'Switch between EN and DE at the bottom left of the sidebar.',
-        'On first start, all backed follows your browser language; your choice is saved on this device and sticks.',
+        'On first start, all/backed follows your browser language; your choice is saved on this device and sticks.',
         'Right next to it, the sun/moon icon toggles between dark and light mode. Dark terminal look is the default; this choice is saved on this device as well.',
       ],
     },
@@ -375,7 +385,7 @@ const en: Content = {
       id: 'privacy',
       title: 'Privacy',
       body: [
-        'all backed works entirely locally: no account, no cloud, no telemetry. The app sends nothing over the network.',
+        'all/backed works entirely locally: no account, no cloud, no telemetry. The app sends nothing over the network.',
         'Only what you explicitly select gets backed up. Backups live where you put them — in your destination folder or in the downloaded archive.',
         'Even if a browser dialog says “Upload”: nothing is uploaded. The dialog wording comes from the browser; the data stays on the device.',
         'Encryption happens before anything is written, right in the browser — details in the “Encryption” section.',
@@ -495,8 +505,9 @@ export default function Help({
       >
         {/* Header: brand, tabs, close */}
         <div className="flex items-center gap-2 border-b border-slate-700/60 light:border-slate-300 px-4 py-3">
-          <span className="mr-2 text-sm font-bold tracking-tight text-primary-400 light:text-primary-700">
-            all backed.
+          <span className="mr-2 text-sm font-bold tracking-tight">
+            <span className="text-primary-400 light:text-primary-700">all/backed</span>
+            <span className="text-slate-100 light:text-slate-900">.</span>
           </span>
           {(['tutorial', 'manual'] as const).map((tab) => (
             <button

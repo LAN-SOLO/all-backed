@@ -39,7 +39,7 @@ const STRINGS = {
     restoreIntro: 'Pick your backup destination folder — the one that contains the "allbacked" directory.',
     pickRepoDir: 'Choose backup location',
     reposFound: 'Backups found',
-    noRepos: 'No all backed repository found in this folder.',
+    noRepos: 'No all/backed repository found in this folder.',
     versions: 'Versions',
     encryptedRepo: 'encrypted',
     enterPassphrase: 'Enter passphrase',
@@ -99,10 +99,26 @@ const STRINGS = {
     errQuotaNeeded: 'needed',
     errQuotaFree: 'free',
     errDirectHint:
-      'Tip: in Chrome, all backed writes straight into a folder on any drive — no browser storage involved.',
+      'Tip: in Chrome, all/backed writes straight into a folder on any drive — no browser storage involved.',
     scanningStats: 'scanning…',
     errNoSources: 'Add at least one source folder first.',
     scanPhase: 'scanning sources',
+    errRepoUnencrypted:
+      'This backup folder was created without encryption. Disable encryption for this task, or create a new task for an encrypted backup.',
+    errRepoInvalid: 'The backup folder is damaged or not an all/backed repository',
+    errManifestInvalid: 'This backup version is damaged and cannot be restored',
+    errBlockCorrupt: 'A data block of the backup is damaged',
+    errVerifyFailed:
+      'Verification failed — written data did not read back correctly. Check the destination drive and run the backup again.',
+    errPermission: 'Access to the folder was denied. Allow access when the browser asks, then try again.',
+    errNotFound:
+      'A folder or file is no longer available (drive disconnected, renamed or moved?). Reconnect it or pick the folder again.',
+    errNotReadable:
+      'A file could not be read — it may have changed during the backup or is locked by another program. Close it and try again.',
+    errDuplicateSource: 'This folder is already in the list.',
+    restoreFailedSome: 'files could not be restored',
+    lastRunFailed: 'failed',
+    statsLocked: 'access is requested on the next run',
   },
   de: {
     tagline: '$ allbacked --free --local --encrypted',
@@ -139,7 +155,7 @@ const STRINGS = {
     restoreIntro: 'Wählen Sie Ihren Backup-Zielordner — den Ordner, der das Verzeichnis „allbacked" enthält.',
     pickRepoDir: 'Backup-Ort wählen',
     reposFound: 'Gefundene Backups',
-    noRepos: 'In diesem Ordner wurde kein all backed-Repository gefunden.',
+    noRepos: 'In diesem Ordner wurde kein all/backed-Repository gefunden.',
     versions: 'Versionen',
     encryptedRepo: 'verschlüsselt',
     enterPassphrase: 'Passphrase eingeben',
@@ -199,10 +215,26 @@ const STRINGS = {
     errQuotaNeeded: 'benötigt',
     errQuotaFree: 'frei',
     errDirectHint:
-      'Tipp: In Chrome sichert all backed direkt in einen Ordner auf einem beliebigen Laufwerk — ganz ohne Browser-Speicher.',
+      'Tipp: In Chrome sichert all/backed direkt in einen Ordner auf einem beliebigen Laufwerk — ganz ohne Browser-Speicher.',
     scanningStats: 'scanne…',
     errNoSources: 'Bitte zuerst mindestens einen Quell-Ordner hinzufügen.',
     scanPhase: 'scanne Quellen',
+    errRepoUnencrypted:
+      'Dieser Backup-Ordner wurde ohne Verschlüsselung angelegt. Deaktivieren Sie die Verschlüsselung für diese Aufgabe oder legen Sie für ein verschlüsseltes Backup eine neue Aufgabe an.',
+    errRepoInvalid: 'Der Backup-Ordner ist beschädigt oder kein all/backed-Repository',
+    errManifestInvalid: 'Diese Backup-Version ist beschädigt und kann nicht wiederhergestellt werden',
+    errBlockCorrupt: 'Ein Datenblock des Backups ist beschädigt',
+    errVerifyFailed:
+      'Prüfung fehlgeschlagen — geschriebene Daten ließen sich nicht korrekt zurücklesen. Bitte Ziel-Laufwerk prüfen und das Backup erneut starten.',
+    errPermission: 'Der Zugriff auf den Ordner wurde verweigert. Erlauben Sie den Zugriff, wenn der Browser fragt, und versuchen Sie es erneut.',
+    errNotFound:
+      'Ein Ordner oder eine Datei ist nicht mehr verfügbar (Laufwerk getrennt, umbenannt oder verschoben?). Bitte erneut verbinden oder den Ordner neu wählen.',
+    errNotReadable:
+      'Eine Datei konnte nicht gelesen werden — sie wurde evtl. während des Backups geändert oder ist von einem anderen Programm gesperrt. Bitte schließen und erneut versuchen.',
+    errDuplicateSource: 'Dieser Ordner ist bereits in der Liste.',
+    restoreFailedSome: 'Dateien konnten nicht wiederhergestellt werden',
+    lastRunFailed: 'fehlgeschlagen',
+    statsLocked: 'Zugriff wird beim nächsten Lauf angefragt',
   },
 } as const;
 

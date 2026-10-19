@@ -1,6 +1,6 @@
 {
   "extName": {
-    "message": "all backed"
+    "message": "all/backed"
   },
   "extDesc": {
     "message": "Simple, encrypted local backups to external drives — straight from your browser. Free tier: no system files, no cloud, no account."
