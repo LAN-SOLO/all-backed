@@ -3,15 +3,36 @@
 // task window); the toolbar button just opens (or focuses) it.
 const api = globalThis.browser ?? globalThis.chrome;
 
-api.action.onClicked.addListener(async () => {
-  const url = api.runtime.getURL('index.html');
-  const tabs = await api.tabs.query({ url });
-  if (tabs.length > 0 && tabs[0].id !== undefined) {
-    await api.tabs.update(tabs[0].id, { active: true });
-    if (tabs[0].windowId !== undefined) {
-      await api.windows.update(tabs[0].windowId, { focused: true });
-    }
-  } else {
-    await api.tabs.create({ url });
+async function findAppTab(url) {
+  try {
+    const tabs = await api.tabs.query({ url });
+    // Without the "tabs" permission a browser may ignore the url filter or
+    // hide tab URLs. Only trust tabs whose URL is visibly our own page, so we
+    // never focus some unrelated tab.
+    return tabs.find((tab) => typeof tab.url === 'string' && tab.url.startsWith(url)) ?? null;
+  } catch {
+    // e.g. a browser that rejects extension URLs as query patterns
+    return null;
   }
+}
+
+async function openApp() {
+  const url = api.runtime.getURL('index.html');
+  const tab = await findAppTab(url);
+  if (tab && tab.id !== undefined) {
+    try {
+      await api.tabs.update(tab.id, { active: true });
+      if (tab.windowId !== undefined) {
+        await api.windows.update(tab.windowId, { focused: true });
+      }
+      return;
+    } catch {
+      // tab vanished between query and update — open a fresh one
+    }
+  }
+  await api.tabs.create({ url });
+}
+
+api.action.onClicked.addListener(() => {
+  void openApp();
 });
