@@ -1,4 +1,4 @@
-# all backed — Free MVP
+# all/backed — 1.0
 
 Backup-Tool als Browser-Extension (Chrome + Firefox, MV3). Free-Tier: einfache
 lokale Sicherungen auf externe Laufwerke, verschlüsselt und dedupliziert — keine
@@ -10,6 +10,8 @@ Website-Repo.
 
 ```bash
 pnpm install
+pnpm test             # Engine-Selbsttest unter Node (In-Memory-Dateisystem, inkl. Regressionstests)
+pnpm typecheck        # tsc --noEmit
 pnpm dev              # App als normale Web-App unter http://localhost:5173
 pnpm build            # Type-Check + dist/ (Chrome, entpackte Extension)
 pnpm build:firefox    # dist-firefox/ mit Firefox-Manifest
@@ -23,7 +25,12 @@ Erweiterung laden" → `dist/`-Ordner wählen. Firefox: `about:debugging` →
 „Temporäres Add-on laden" → `dist-firefox/manifest.json`. Der Toolbar-Button
 öffnet die App als Tab.
 
-Engine-Selbsttest (Dev-Server, läuft komplett über OPFS):
+Engine-Selbsttest ohne Browser: `pnpm test` baut die Engine per Vite (SSR) und
+führt `src/engine/selftest.ts` gegen `scripts/memfs.mjs` aus — eine
+In-Memory-Nachbildung der File System Access API mit Chromium-Semantik
+(unzulässige Namen, atomares `close()`, `abort()`). Exit-Code 0 = PASS.
+
+Engine-Selbsttest im Browser (Dev-Server, läuft komplett über OPFS):
 Konsole öffnen → `await window.abSelfTest()` — deckt auch die
 Firefox-Fallback-Pfade ab (Listen-Quelle, Tar-Roundtrip).
 Fallback-UI in Chrome erzwingen: `http://localhost:5173/?fallback`.
@@ -50,16 +57,26 @@ Gleiches Repository-Format, gleiche Engine — nur die Ein-/Ausgänge wechseln.
   Hell-Modus per Umschalter in der Seitenleiste (`src/theme.ts`, Tailwind-Variante `light:`)
 - **Engine** (`src/engine/`): File System Access API, Chunking (4 MiB fest),
   SHA-256-Dedup, gzip (CompressionStream), AES-256-GCM (WebCrypto),
-  Schlüssel aus Passphrase via PBKDF2-SHA-256 (310k Iterationen),
-  Stichproben-Verify nach jedem Lauf, Restore aus jeder Version
+  Schlüssel aus Passphrase via PBKDF2-SHA-256 (600k Iterationen für neue
+  Repositories, bestehende behalten ihren Wert aus `ab-repo.json`),
+  Passphrase-Prüfung gegen vorhandene Daten vor jedem Folge-Lauf,
+  Stichproben-Verify vor dem Schreiben des Manifests, Restore aus jeder Version
+  mit Prüfsummen-Check je Block und Pfad-Validierung (kein `..`, keine
+  absoluten Pfade)
 - **Repository-Format v1:** `allbacked/<task>/ab-repo.json` + `blocks/<hh>/<hash>`
   + `manifests/manifest-<ts>.json[.enc]` — selbstbeschreibend, dokumentiert in
   `src/engine/types.ts`
 
-## Bewusste MVP-Vereinfachungen (Upgrade-Pfad im Plan)
+Audit, Testmatrix und manuelle Checkliste für 1.0: `AUDIT-1.0.md`.
+
+## Bewusste Vereinfachungen (Upgrade-Pfad im Plan)
 
 - TypeScript-Engine statt Rust/WASM-Core (Format bleibt stabil, Core austauschbar)
 - Fixe Chunk-Größe statt content-defined chunking
 - gzip statt zstd, PBKDF2 statt Argon2id
 - Block-Dateinamen = Klartext-SHA-256 (Fingerprint-Leak; später keyed hashes)
-- Kein Zeitplan, kein Firefox-Pfad (Pro / Phase 2)
+- Kein Zeitplan (Pro)
+- Keine leeren Ordner, Dateirechte oder Änderungszeiten im Restore
+- Aufgaben-Ordnername wird beim ersten erfolgreichen Lauf festgeschrieben
+  (`repoSlug`); zwei Aufgaben mit gleichem Namen auf demselben Ziel teilen
+  sich ein Repository (bei gleicher Passphrase) bzw. werden abgewiesen

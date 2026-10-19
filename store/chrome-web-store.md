@@ -1,6 +1,6 @@
-# Chrome Web Store — Listing (Beta v0.1.0)
+# Chrome Web Store — Listing (v1.0.0)
 
-Paket bauen: `pnpm build && pnpm pack:chrome` → `all-backed-chrome-v0.1.0.zip`
+Paket bauen: `pnpm build && pnpm pack:chrome` → `all-backed-chrome-v1.0.0.zip`
 Upload: https://chrome.google.com/webstore/devconsole (einmalig 5 USD Registrierung)
 
 **Beta-Empfehlung:** Sichtbarkeit **„Nicht gelistet"** (unlisted) — installierbar
@@ -11,7 +11,7 @@ Upload: https://chrome.google.com/webstore/devconsole (einmalig 5 USD Registrier
 
 | Feld | Wert |
 | --- | --- |
-| Name | all backed |
+| Name | all/backed |
 | Kategorie | Productivity → Tools |
 | Sprachen | Englisch (Standard) + Deutsch |
 
@@ -23,7 +23,7 @@ Upload: https://chrome.google.com/webstore/devconsole (einmalig 5 USD Registrier
 **Ausführliche Beschreibung EN:**
 
 ```
-all backed is a free backup tool that runs entirely in your browser.
+all/backed is a free backup tool that runs entirely in your browser.
 
 $ allbacked --free --local --encrypted
 
@@ -37,9 +37,9 @@ WHAT IT DOES
 • Restore single versions to any folder — no account, no cloud, no tracking
 
 FREE TIER LIMITS
-Browsers cannot read system files (by design), so all backed Free backs up
+Browsers cannot read system files (by design), so all/backed Free backs up
 your documents, projects and media — not your operating system. Complete
-system backups, schedules and cloud targets are coming in all backed Pro
+system backups, schedules and cloud targets are coming in all/backed Pro
 (companion app for macOS, Windows and Linux).
 
 PRIVACY
@@ -52,7 +52,7 @@ Made by LAN-SOLO — https://lan-solo.com/en/tools/all-backed/
 **Ausführliche Beschreibung DE:**
 
 ```
-all backed ist ein kostenloses Backup-Tool, das vollständig im Browser läuft.
+all/backed ist ein kostenloses Backup-Tool, das vollständig im Browser läuft.
 
 $ allbacked --free --local --encrypted
 
@@ -68,10 +68,10 @@ WAS ES KANN
   ohne Cloud, ohne Tracking
 
 GRENZEN DES FREE-TIERS
-Browser dürfen aus guten Gründen keine Systemdateien lesen. all backed Free
+Browser dürfen aus guten Gründen keine Systemdateien lesen. all/backed Free
 sichert daher Dokumente, Projekte und Medien — nicht das Betriebssystem.
 Komplette Systemsicherungen, Zeitpläne und Cloud-Ziele kommen mit
-all backed Pro (Companion-App für macOS, Windows und Linux).
+all/backed Pro (Companion-App für macOS, Windows und Linux).
 
 DATENSCHUTZ
 Alles passiert lokal. Die Extension stellt keine Netzwerkverbindungen her,
@@ -114,14 +114,14 @@ then use "Restore" to restore it.
 
 # Firefox (AMO) — Listing-Notizen (Beta)
 
-Paket: `pnpm build:firefox && pnpm pack:firefox` → `all-backed-firefox-v0.1.0.zip`
+Paket: `pnpm build:firefox && pnpm pack:firefox` → `all-backed-firefox-v1.0.0.zip`
 Upload: https://addons.mozilla.org/developers/ (Beta: als „Unlisted" signieren
 lassen und die .xpi direkt verteilen, oder Listed mit Beta-Hinweis).
 
 - Add-on-ID: `allbacked@lan-solo.com` (in `manifest.firefox.json`)
 - Minimum: Firefox 115 (OPFS + MV3 event pages)
 - Firefox-Besonderheit in der Beschreibung erwähnen: Da Firefox die File System
-  Access API nicht anbietet, arbeitet all backed dort im **Archiv-Modus**:
+  Access API nicht anbietet, arbeitet all/backed dort im **Archiv-Modus**:
   Quelle per Ordner-Auswahl, Backup wird lokal vorbereitet und als .tar-Archiv
   heruntergeladen; Restore liest dieses Archiv wieder ein.
 - Datenschutz identisch: keine Netzwerkzugriffe, keine Datenerhebung.
