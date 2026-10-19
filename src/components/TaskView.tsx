@@ -3,10 +3,10 @@ import { BackupTask, Progress, REPO_DIR, RunSummary } from '../engine/types';
 import { claimRepoSlug } from '../engine/store';
 import { SourceDir, runBackup } from '../engine/backup';
 import { ensurePermission, getDirByPath, walkFiles } from '../engine/fsx';
-import { downloadBlob, opfsRepoContainer, supportsFsAccess } from '../engine/caps';
+import { downloadBlob, localDateStamp, opfsRepoContainer, supportsFsAccess } from '../engine/caps';
 import { tarDirectory } from '../engine/tar';
 import { Lang, StringKey, makeT } from '../i18n';
-import { errorMessage } from '../errors';
+import { describeError, errorMessage, formatError } from '../errors';
 
 interface Props {
   task: BackupTask;
@@ -166,11 +166,32 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
   const [handleStats, setHandleStats] = useState<Record<string, FolderStats>>({});
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
-  const [banner, setBanner] = useState<{ ok: boolean; summary?: RunSummary; note?: string; message?: string } | null>(null);
+  const [banner, setBanner] = useState<{
+    ok: boolean;
+    cancelled?: boolean;
+    summary?: RunSummary;
+    note?: string;
+    message?: string;
+  } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const deleteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (deleteTimer.current) clearTimeout(deleteTimer.current);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const lastPaint = useRef(0);
+  // on a small window the live log and the result banner can be off screen
+  const logRef = useRef<HTMLDivElement>(null);
+  const bannerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (running) logRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [running]);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
   const fileInput = useRef<HTMLInputElement>(null);
 
   // folder stats for picked directory handles (async walk, cached per name+index)
@@ -365,6 +386,9 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
     setRunning(true);
     onBusyChange?.(true);
     setProgress(null);
+    setCancelling(false);
+    const abort = new AbortController();
+    abortRef.current = abort;
     const started = performance.now();
     // pinned on the first run, so renaming keeps the repository; a slug
     // another task already uses gets a number instead of sharing its folder
@@ -386,6 +410,7 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
         taskName: task.name,
         repoSlug,
         passphrase: task.encrypt ? passphrase : undefined,
+        signal: abort.signal,
         onProgress: (p) => {
           const now = performance.now();
           if (p.phase !== 'backup' || now - lastPaint.current > 60) {
@@ -398,14 +423,21 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
       if (!supportsFsAccess) {
         const repoRoot = await getDirByPath(dest, [REPO_DIR, repoSlug], false);
         const archive = await tarDirectory(repoRoot);
-        const stamp = new Date().toISOString().slice(0, 10);
-        downloadBlob(archive, `allbacked-${repoSlug}-${stamp}.tar`);
+        downloadBlob(archive, `allbacked-${repoSlug}-${localDateStamp()}.tar`);
         note = `${t('exportedTar')} (${formatBytes(archive.size)})`;
       }
       setBanner({ ok: true, summary, note });
       await onChange({ ...task, repoSlug, lastRun: summary });
     } catch (err) {
-      const message = errorMessage(err, t);
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        // cancelled by the user: no version was written, the previous
+        // "Last run" stays as it was — only the repository folder is pinned
+        setBanner({ ok: false, cancelled: true });
+        if (repoSlug && repoSlug !== task.repoSlug) await onChange({ ...task, repoSlug }).catch(() => {});
+        return;
+      }
+      const info = describeError(err);
+      const message = formatError(info, t);
       setBanner({ ok: false, message });
       // record the failure so the sidebar status dot turns red
       const failedRun: RunSummary = {
@@ -419,13 +451,22 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
         durationMs: Math.round(performance.now() - started),
         encrypted: task.encrypt,
         error: message,
+        errorInfo: info,
       };
       await onChange({ ...task, ...(repoSlug ? { repoSlug } : {}), lastRun: failedRun }).catch(() => {});
     } finally {
+      abortRef.current = null;
       onBusyChange?.(false);
       setRunning(false);
+      setCancelling(false);
       setProgress(null);
     }
+  };
+
+  const cancelRun = () => {
+    if (!abortRef.current) return;
+    setCancelling(true);
+    abortRef.current.abort();
   };
 
   // triggered by the function key bar (F5 backup / F8 delete) and Start button
@@ -435,10 +476,11 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
   deleteRef.current = () => {
     if (running) return; // never delete the task under a running backup
     if (confirmingDelete) {
+      if (deleteTimer.current) clearTimeout(deleteTimer.current);
       onDelete();
     } else {
       setConfirmingDelete(true);
-      setTimeout(() => setConfirmingDelete(false), 3000);
+      deleteTimer.current = setTimeout(() => setConfirmingDelete(false), 3000);
     }
   };
   useEffect(() => {
@@ -499,7 +541,7 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
     <div className="mx-auto max-w-4xl space-y-6">
       <div className="flex items-center justify-between gap-4">
         <input
-          className="input max-w-md text-lg font-bold"
+          className="input min-w-0 max-w-md flex-1 text-lg font-bold"
           value={task.name}
           disabled={running}
           aria-label={t('taskName')}
@@ -508,7 +550,7 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
         <button
           onClick={() => deleteRef.current()}
           disabled={running}
-          className={`btn-ghost ${confirmingDelete ? 'border-red-500/60 text-red-300 light:text-red-700' : 'text-red-400 light:text-red-700 hover:text-red-300 light:hover:text-red-700'}`}
+          className={`btn-ghost shrink-0 whitespace-nowrap ${confirmingDelete ? 'border-red-500/60 text-red-300 light:text-red-700' : 'text-red-400 light:text-red-700 hover:text-red-300 light:hover:text-red-700'}`}
         >
           {confirmingDelete ? t('confirmDelete') : t('deleteTask')}
         </button>
@@ -517,17 +559,22 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
       {/* CCC-style result banner */}
       {banner && (
         <div
-          className={`card ab-rise flex items-start gap-4 p-5 ${banner.ok ? 'border-emerald-500/50' : 'border-red-500/50'}`}
-          role={banner.ok ? 'status' : 'alert'}
+          ref={bannerRef}
+          className={`card ab-rise flex scroll-my-6 items-start gap-4 p-5 ${
+            banner.ok ? 'border-emerald-500/50' : banner.cancelled ? 'border-amber-500/50' : 'border-red-500/50'
+          }`}
+          role={banner.ok || banner.cancelled ? 'status' : 'alert'}
         >
           <span
             className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-              banner.ok ? 'bg-emerald-500' : 'bg-red-500'
+              banner.ok ? 'bg-emerald-500' : banner.cancelled ? 'bg-amber-400' : 'bg-red-500'
             }`}
           >
             <svg className="h-5 w-5 text-slate-950" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
               {banner.ok ? (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              ) : banner.cancelled ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12h12" />
               ) : (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               )}
@@ -535,7 +582,7 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
           </span>
           <div className="min-w-0 flex-1 text-sm">
             <div className="mb-2 text-base font-bold text-slate-100 light:text-slate-900">
-              {banner.ok ? t('successTitle') : t('failTitle')}
+              {banner.ok ? t('successTitle') : banner.cancelled ? t('cancelledTitle') : t('failTitle')}
             </div>
             {banner.ok && banner.summary && (
               <dl className="space-y-1 text-slate-300 light:text-slate-700">
@@ -564,7 +611,8 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
               </dl>
             )}
             {banner.ok && banner.summary && <SkippedList summary={banner.summary} t={t} />}
-            {!banner.ok && <p className="text-red-300 light:text-red-700">{banner.message}</p>}
+            {banner.cancelled && <p className="text-amber-300 light:text-amber-800">{t('cancelledNote')}</p>}
+            {!banner.ok && !banner.cancelled && <p className="break-words text-red-300 light:text-red-700">{banner.message}</p>}
           </div>
           <button onClick={() => setBanner(null)} className="btn-ghost shrink-0 px-4 py-1">
             {t('ok')}
@@ -573,7 +621,7 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
       )}
 
       {/* SOURCES list / DESTINATION / AUTOMATION, CCC layout with terminal tree */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div
           className={`card p-5 transition-colors ${
             isDragOver ? 'border-primary-400 bg-primary-600/10' : ''
@@ -696,14 +744,21 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
 
       {/* terminal-style live log */}
       {running && (
-        <div className="ab-rise ab-running overflow-hidden rounded-xl border border-slate-700/60 light:border-slate-300 bg-slate-950/90 light:bg-white">
+        <div ref={logRef} className="ab-rise ab-running scroll-my-6 overflow-hidden rounded-xl border border-slate-700/60 light:border-slate-300 bg-slate-950/90 light:bg-white">
           <div className="flex items-center gap-1.5 border-b border-slate-700/60 light:border-slate-300 px-3 py-2">
             <span className="h-2.5 w-2.5 rounded-full bg-red-500/80" />
             <span className="h-2.5 w-2.5 rounded-full bg-amber-400/80" />
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/80" />
-            <span className="ml-2 truncate text-xs text-slate-500 light:text-slate-600">
+            <span className="ml-2 min-w-0 flex-1 truncate text-xs text-slate-500 light:text-slate-600">
               allbacked — {task.name}
             </span>
+            <button
+              onClick={cancelRun}
+              disabled={cancelling}
+              className="shrink-0 rounded border border-slate-600/60 light:border-slate-400/60 px-2 py-0.5 text-xs text-slate-300 light:text-slate-700 transition-colors hover:border-red-500/60 hover:text-red-300 light:hover:text-red-700 disabled:opacity-50"
+            >
+              {cancelling ? t('cancelling') : `[${t('cancel')}]`}
+            </button>
           </div>
           <div className="space-y-1.5 p-4 text-sm text-slate-300 light:text-slate-700">
             <div className="truncate">
@@ -734,7 +789,12 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
           {task.lastRun.error ? (
             <div className="text-sm text-slate-300 light:text-slate-700">
               {new Date(task.lastRun.finishedAt).toLocaleString(lang)} —{' '}
-              <span className="text-red-400 light:text-red-700">{t('lastRunFailed')}</span>: {task.lastRun.error}
+              <span className="text-red-400 light:text-red-700">{t('lastRunFailed')}</span>:{' '}
+              <span className="break-words">
+                {task.lastRun.errorInfo
+                  ? formatError(task.lastRun.errorInfo as Parameters<typeof formatError>[0], t)
+                  : task.lastRun.error}
+              </span>
             </div>
           ) : (
           <div className="text-sm text-slate-300 light:text-slate-700">

@@ -2,18 +2,35 @@
 // uses (directory/file handles, writable streams). Mirrors Chromium's
 // semantics where they matter for correctness:
 //   - names '', '.', '..' and names containing '/' or '\' are rejected
-//     (TypeError), so path traversal attempts fail exactly like in Chrome
+//     (TypeError), so path traversal attempts fail exactly like in Chrome;
+//     so are names Windows cannot hold (':' '*' '?' '"' '<' '>' '|', control
+//     characters, trailing dot/space, CON/NUL/COM1…) — Chromium's name check
+//     on Windows, the strictest target a restore can meet
+//   - lookups are case- and normalization-insensitive (like APFS and NTFS):
+//     "README.txt" finds "readme.txt", the first spelling is kept
 //   - createWritable() writes to a swap buffer; close() commits atomically,
 //     abort() discards (a failed restore must not leave a half file)
 //   - missing entries throw NotFoundError, wrong kinds TypeMismatchError
 // Used by scripts/selftest-node.mjs to run the engine self-test under Node.
 
+const fold = (name) => name.normalize('NFC').toLowerCase();
+
 function domError(name, message) {
   return new DOMException(message, name);
 }
 
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.[^.]*)?$/i;
+
 function checkName(name) {
-  if (typeof name !== 'string' || name === '' || name === '.' || name === '..' || /[/\\]/.test(name)) {
+  if (
+    typeof name !== 'string' ||
+    name === '' ||
+    name === '.' ||
+    name === '..' ||
+    /[/\\<>:"|?*\u0000-\u001f]/.test(name) ||
+    /[. ]$/.test(name) ||
+    WINDOWS_RESERVED.test(name)
+  ) {
     throw new TypeError(`Name is not allowed: ${JSON.stringify(name)}`);
   }
 }
@@ -82,42 +99,52 @@ export class MemDirHandle {
   }
   async getDirectoryHandle(name, opts = {}) {
     checkName(name);
-    const existing = this.children.get(name);
+    const existing = this.children.get(fold(name));
     if (existing) {
       if (existing.kind !== 'directory') throw domError('TypeMismatchError', `${name} is a file`);
       return existing;
     }
     if (!opts.create) throw domError('NotFoundError', `${name} not found`);
     const dir = new MemDirHandle(name);
-    this.children.set(name, dir);
+    dir.parent = this;
+    this.children.set(fold(name), dir);
     return dir;
   }
   async getFileHandle(name, opts = {}) {
     checkName(name);
-    const existing = this.children.get(name);
+    const existing = this.children.get(fold(name));
     if (existing) {
       if (existing.kind !== 'file') throw domError('TypeMismatchError', `${name} is a directory`);
       return existing;
     }
     if (!opts.create) throw domError('NotFoundError', `${name} not found`);
     const file = new MemFileHandle(name);
-    this.children.set(name, file);
+    file.parent = this;
+    this.children.set(fold(name), file);
     return file;
   }
   async removeEntry(name, opts = {}) {
     checkName(name);
-    const existing = this.children.get(name);
+    const existing = this.children.get(fold(name));
     if (!existing) throw domError('NotFoundError', `${name} not found`);
     if (existing.kind === 'directory' && existing.children.size > 0 && !opts.recursive) {
       throw domError('InvalidModificationError', `${name} not empty`);
     }
-    this.children.delete(name);
+    this.children.delete(fold(name));
   }
   async *entries() {
-    for (const [name, handle] of [...this.children]) yield [name, handle];
+    for (const handle of [...this.children.values()]) yield [handle.name, handle];
+  }
+  async resolve(possibleDescendant) {
+    const path = [];
+    for (let node = possibleDescendant; node; node = node.parent) {
+      if (node === this) return path.reverse();
+      path.push(node.name);
+    }
+    return null;
   }
   async *keys() {
-    for (const name of [...this.children.keys()]) yield name;
+    for (const handle of [...this.children.values()]) yield handle.name;
   }
   async *values() {
     for (const handle of [...this.children.values()]) yield handle;

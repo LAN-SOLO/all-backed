@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { EngineError, Progress } from '../engine/types';
 import { OpenRepo, findRepos, listManifests, openRepo, readManifest } from '../engine/repo';
-import { RestoreFailure, runRestore } from '../engine/restore';
-import { downloadBlob, opfsScratch, supportsFsAccess, withScratchLock } from '../engine/caps';
+import { RestoreFailure, RestoreRename, inspectRestoreTarget, runRestore } from '../engine/restore';
+import { downloadBlob, localDateStamp, opfsScratch, supportsFsAccess, withScratchLock } from '../engine/caps';
 import { tarDirectory, untarToDirectory } from '../engine/tar';
 import { Lang, makeT } from '../i18n';
 import { errorMessage } from '../errors';
@@ -31,7 +31,29 @@ export default function RestoreView({ lang, onBusyChange }: Props) {
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failures, setFailures] = useState<RestoreFailure[]>([]);
+  const [renamed, setRenamed] = useState<RestoreRename[]>([]);
+  const [cancelledMsg, setCancelledMsg] = useState<string | null>(null);
+  // a non-empty target folder: same-named files would be overwritten, so
+  // the restore waits for an explicit confirmation
+  const [pending, setPending] = useState<{
+    manifestName: string;
+    target: FileSystemDirectoryHandle;
+    existing: string[];
+  } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [taskKind, setTaskKind] = useState<'import' | 'restore'>('restore');
   const tarInput = useRef<HTMLInputElement>(null);
+  // the confirmation and results appear below the version list — scroll
+  // them into view, on a small window they would be off screen
+  const pendingRef = useRef<HTMLDivElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (pending) pendingRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [pending]);
+  useEffect(() => {
+    if (doneMsg || error || cancelledMsg) resultRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [doneMsg, error, cancelledMsg]);
 
   useEffect(() => {
     onBusyChange?.(running);
@@ -47,7 +69,34 @@ export default function RestoreView({ lang, onBusyChange }: Props) {
     setDoneMsg(null);
     setError(null);
     setFailures([]);
+    setRenamed([]);
+    setCancelledMsg(null);
+    setPending(null);
   };
+
+  const startTask = (kind: 'import' | 'restore') => {
+    setTaskKind(kind);
+    const abort = new AbortController();
+    abortRef.current = abort;
+    setCancelling(false);
+    setRunning(true);
+    return abort.signal;
+  };
+
+  const endTask = () => {
+    abortRef.current = null;
+    setCancelling(false);
+    setRunning(false);
+    setProgress(null);
+  };
+
+  const cancel = () => {
+    if (!abortRef.current) return;
+    setCancelling(true);
+    abortRef.current.abort();
+  };
+
+  const isAbort = (err: unknown) => err instanceof DOMException && err.name === 'AbortError';
 
   const scanDir = async (dir: FileSystemDirectoryHandle) => {
     reset();
@@ -77,20 +126,20 @@ export default function RestoreView({ lang, onBusyChange }: Props) {
 
   const importTar = async (archive: Blob) => {
     if (running) return;
-    setRunning(true);
+    const signal = startTask('import');
     try {
       const scratch = await withScratchLock(async () => {
         const dir = await opfsScratch('restore-import');
-        await untarToDirectory(archive, dir);
+        await untarToDirectory(archive, dir, signal);
         return dir;
       });
       await scanDir(scratch);
     } catch (err) {
       reset();
       setRepos(null);
-      setError(errorMessage(err, t));
+      if (!isAbort(err)) setError(errorMessage(err, t));
     } finally {
-      setRunning(false);
+      endTask();
       if (tarInput.current) tarInput.current.value = '';
     }
   };
@@ -140,21 +189,51 @@ export default function RestoreView({ lang, onBusyChange }: Props) {
     }
   };
 
-  const restore = async (manifestName: string) => {
-    if (!open || running) return;
+  const clearResult = () => {
     setError(null);
     setDoneMsg(null);
     setFailures([]);
+    setRenamed([]);
+    setCancelledMsg(null);
+    setPending(null);
+  };
+
+  /** "Restore this version": pick the target, check it, then restore. */
+  const restore = async (manifestName: string) => {
+    if (!open || running) return;
+    clearResult();
+    if (!supportsFsAccess) {
+      await doRestore(manifestName, null);
+      return;
+    }
+    let target: FileSystemDirectoryHandle;
     try {
-      let target: FileSystemDirectoryHandle | null = null;
-      if (supportsFsAccess) {
-        try {
-          target = await window.showDirectoryPicker({ id: 'ab-restore-target', mode: 'readwrite' });
-        } catch {
-          return; // picker cancelled
-        }
+      target = await window.showDirectoryPicker({ id: 'ab-restore-target', mode: 'readwrite' });
+    } catch {
+      return; // picker cancelled
+    }
+    try {
+      const check = await inspectRestoreTarget(target, open.root);
+      if (check.insideRepo) {
+        setError(t('errTargetInRepo'));
+        return;
       }
-      setRunning(true);
+      if (check.existing.length > 0) {
+        setPending({ manifestName, target, existing: check.existing });
+        return;
+      }
+    } catch (err) {
+      setError(errorMessage(err, t));
+      return;
+    }
+    await doRestore(manifestName, target);
+  };
+
+  const doRestore = async (manifestName: string, target: FileSystemDirectoryHandle | null) => {
+    if (!open || running) return;
+    clearResult();
+    const signal = startTask('restore');
+    try {
       await withScratchLock(async () => {
         const dest = target ?? (await opfsScratch('restore-out'));
         const result = await runRestore({
@@ -162,8 +241,10 @@ export default function RestoreView({ lang, onBusyChange }: Props) {
           manifestName,
           target: dest,
           onProgress: setProgress,
+          signal,
         });
         setFailures(result.failed);
+        setRenamed(result.renamed);
         if (supportsFsAccess) {
           setDoneMsg(
             `${t('restored')}: ${result.fileCount} ${t('files')} → ${dest.name} (${(
@@ -172,16 +253,15 @@ export default function RestoreView({ lang, onBusyChange }: Props) {
           );
         } else {
           const archive = await tarDirectory(dest);
-          const stamp = new Date().toISOString().slice(0, 10);
-          downloadBlob(archive, `restored-${stamp}.tar`);
+          downloadBlob(archive, `restored-${localDateStamp()}.tar`);
           setDoneMsg(`${t('restored')}: ${result.fileCount} ${t('files')} — ${t('restoredTarHint')}`);
         }
       });
     } catch (err) {
-      setError(errorMessage(err, t));
+      if (isAbort(err)) setCancelledMsg(t('restoreCancelled'));
+      else setError(errorMessage(err, t));
     } finally {
-      setRunning(false);
-      setProgress(null);
+      endTask();
     }
   };
 
@@ -246,13 +326,14 @@ export default function RestoreView({ lang, onBusyChange }: Props) {
           <div className="flex gap-2">
             <input
               type="password"
-              className="input max-w-sm"
+              className="input min-w-0 max-w-sm flex-1"
               placeholder={t('enterPassphrase')}
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && selectRepo(selected, passphrase)}
+              disabled={running}
+              onKeyDown={(e) => e.key === 'Enter' && !running && selectRepo(selected, passphrase)}
             />
-            <button onClick={() => selectRepo(selected, passphrase)} className="btn-ghost">
+            <button onClick={() => selectRepo(selected, passphrase)} disabled={running} className="btn-ghost shrink-0">
               {t('unlock')}
             </button>
           </div>
@@ -264,9 +345,9 @@ export default function RestoreView({ lang, onBusyChange }: Props) {
           <div className="mb-3 text-xs uppercase tracking-widest text-slate-500 light:text-slate-600">{t('versions')}</div>
           <ul className="space-y-2">
             {manifests.map((name) => (
-              <li key={name} className="flex items-center justify-between gap-4">
+              <li key={name} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
                 <span className="text-sm text-slate-300 light:text-slate-700">{manifestLabel(name)}</span>
-                <button onClick={() => restore(name)} disabled={running} className="btn-ghost">
+                <button onClick={() => restore(name)} disabled={running} className="btn-ghost whitespace-nowrap">
                   {running ? t('restoring') : t('startRestore')}
                 </button>
               </li>
@@ -275,14 +356,77 @@ export default function RestoreView({ lang, onBusyChange }: Props) {
         </div>
       )}
 
-      {running && progress && (
-        <div className="card p-5 text-sm text-slate-300 light:text-slate-700">
-          <span className="text-primary-400 light:text-primary-700">$</span> {t('phaseRestore')}
-          {progress.path ? `: ${progress.path}` : '…'} — {progress.filesDone} {t('files')}
+      {pending && !running && (
+        <div ref={pendingRef} className="card ab-rise scroll-my-6 space-y-3 border-amber-500/50 p-5 text-sm" role="alertdialog" aria-label={t('targetNotEmpty')}>
+          <div className="font-semibold text-amber-300 light:text-amber-800">
+            {t('targetNotEmpty')} {pending.target.name}
+          </div>
+          <ul className="space-y-0.5 text-xs text-slate-400 light:text-slate-600">
+            {pending.existing.map((name) => (
+              <li key={name} className="break-all">
+                <span className="text-slate-500 light:text-slate-600">└─</span> {name}
+              </li>
+            ))}
+            {pending.existing.length >= 5 && <li>…</li>}
+          </ul>
+          <p className="text-slate-300 light:text-slate-700">{t('targetNotEmptyHint')}</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => void doRestore(pending.manifestName, pending.target)}
+              className="btn-ghost border-amber-500/60 text-amber-300 light:text-amber-800"
+            >
+              {t('overwriteRestore')}
+            </button>
+            <button onClick={() => void restore(pending.manifestName)} className="btn-ghost">
+              {t('otherFolder')}
+            </button>
+            <button onClick={() => setPending(null)} className="btn-ghost">
+              {t('cancel')}
+            </button>
+          </div>
         </div>
       )}
 
-      {doneMsg && <div className="card border-emerald-500/50 p-4 text-sm text-emerald-300 light:text-emerald-700">{doneMsg}</div>}
+      {running && (
+        <div className="card flex items-start gap-3 p-5 text-sm text-slate-300 light:text-slate-700">
+          <span className="min-w-0 flex-1 break-all">
+            <span className="text-primary-400 light:text-primary-700">$</span>{' '}
+            {taskKind === 'import' ? t('phaseImport') : t('phaseRestore')}
+            {progress?.path ? `: ${progress.path}` : '…'}
+            {progress ? ` — ${progress.filesDone}/${progress.totalFiles} ${t('files')}` : ''}
+          </span>
+          <button
+            onClick={cancel}
+            disabled={cancelling}
+            className="shrink-0 rounded border border-slate-600/60 light:border-slate-400/60 px-2 py-0.5 text-xs text-slate-300 light:text-slate-700 transition-colors hover:border-red-500/60 hover:text-red-300 light:hover:text-red-700 disabled:opacity-50"
+          >
+            {cancelling ? t('cancelling') : `[${t('cancel')}]`}
+          </button>
+        </div>
+      )}
+
+      <div ref={resultRef} className="scroll-my-6 space-y-6">
+      {doneMsg && <div className="card break-words border-emerald-500/50 p-4 text-sm text-emerald-300 light:text-emerald-700">{doneMsg}</div>}
+      {cancelledMsg && (
+        <div className="card border-amber-500/50 p-4 text-sm text-amber-300 light:text-amber-800" role="status">
+          {cancelledMsg}
+        </div>
+      )}
+      {renamed.length > 0 && (
+        <div className="card border-amber-500/50 p-4 text-sm text-amber-300 light:text-amber-800" role="status">
+          <div className="mb-2 font-semibold">
+            {renamed.length} {t('renamedFiles')}
+          </div>
+          <ul className="max-h-48 space-y-1 overflow-y-auto text-xs">
+            {renamed.slice(0, 200).map((r, i) => (
+              <li key={i} className="break-all">
+                <span className="text-slate-500 light:text-slate-600">└─</span> {r.path} → {r.to}
+              </li>
+            ))}
+            {renamed.length > 200 && <li>…</li>}
+          </ul>
+        </div>
+      )}
       {failures.length > 0 && (
         <div className="card border-amber-500/50 p-4 text-sm text-amber-300 light:text-amber-800" role="alert">
           <div className="mb-2 font-semibold">
@@ -299,10 +443,11 @@ export default function RestoreView({ lang, onBusyChange }: Props) {
         </div>
       )}
       {error && (
-        <div className="card border-red-500/50 p-4 text-sm text-red-300 light:text-red-700" role="alert">
+        <div className="card break-words border-red-500/50 p-4 text-sm text-red-300 light:text-red-700" role="alert">
           {error}
         </div>
       )}
+      </div>
     </div>
   );
 }

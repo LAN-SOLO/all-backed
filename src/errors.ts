@@ -1,6 +1,17 @@
 // Maps engine and browser errors to a translated, actionable message.
+//
+// describeError() turns an error into a language-neutral ErrorInfo (i18n
+// keys + technical detail). The UI formats it with the current language, and
+// a failed run stores the ErrorInfo — so its "Last run" card follows a later
+// EN/DE switch instead of showing the language of the failure.
 import { EngineError } from './engine/types';
-import { StringKey } from './i18n';
+import { StringKey, isStringKey } from './i18n';
+
+export interface ErrorInfo {
+  keys: StringKey[];
+  /** Language-neutral detail (file/block name) or, for unknown errors, the raw message. */
+  detail?: string;
+}
 
 const ENGINE_KEYS: Record<EngineError['code'], StringKey> = {
   'passphrase-required': 'errPassphraseRequired',
@@ -12,29 +23,53 @@ const ENGINE_KEYS: Record<EngineError['code'], StringKey> = {
   'repo-invalid': 'errRepoInvalid',
   'manifest-invalid': 'errManifestInvalid',
   'block-corrupt': 'errBlockCorrupt',
+  'archive-invalid': 'errArchiveInvalid',
+  'archive-truncated': 'errArchiveTruncated',
 };
 
-// codes whose technical detail helps (which file/block) — appended in parens
-const WITH_DETAIL = new Set<EngineError['code']>(['repo-invalid', 'manifest-invalid', 'block-corrupt']);
+// codes whose detail helps (which file/block/folder) — appended in parens
+const WITH_DETAIL = new Set<EngineError['code']>([
+  'repo-invalid',
+  'manifest-invalid',
+  'block-corrupt',
+  'permission-denied',
+]);
 
-export function errorMessage(err: unknown, t: (key: StringKey) => string): string {
+export function describeError(err: unknown): ErrorInfo {
   if (err instanceof EngineError) {
-    const base = t(ENGINE_KEYS[err.code]);
-    return WITH_DETAIL.has(err.code) ? `${base} (${err.message})` : base;
+    const keys: StringKey[] = [ENGINE_KEYS[err.code]];
+    return WITH_DETAIL.has(err.code) && err.detail ? { keys, detail: err.detail } : { keys };
   }
   if (err instanceof DOMException) {
+    if (err.name === 'AbortError') return { keys: ['errCancelled'] };
     if (err.name === 'QuotaExceededError' || err.name === 'UnknownError') {
-      return `${t('errQuota')}. ${t('errDirectHint')}`;
+      return { keys: ['errQuota', 'errDirectHint'] };
     }
-    if (err.name === 'NotAllowedError' || err.name === 'SecurityError') return t('errPermission');
-    if (err.name === 'NotFoundError') return t('errNotFound');
-    if (err.name === 'NotReadableError') return t('errNotReadable');
-    if (err.name === 'NoModificationAllowedError') return t('errLocked');
+    if (err.name === 'NotAllowedError' || err.name === 'SecurityError') return { keys: ['errPermission'] };
+    if (err.name === 'NotFoundError') return { keys: ['errNotFound'] };
+    if (err.name === 'NotReadableError') return { keys: ['errNotReadable'] };
+    if (err.name === 'NoModificationAllowedError' || err.name === 'InvalidStateError') {
+      return { keys: ['errLocked'] };
+    }
+    if (err.name === 'TypeMismatchError') return { keys: ['errTypeMismatch'] };
   }
   // Chromium rejects names the target file system can't hold with a TypeError
-  // ("Name is not allowed.") — e.g. "a:b.txt" restored onto Windows
+  // ("Name is not allowed.") — the engine renames those before writing, so
+  // this is only a fallback for names it could not foresee
   if (err instanceof TypeError && /name/i.test(err.message) && /not allowed|invalid/i.test(err.message)) {
-    return t('errBadName');
+    return { keys: ['errBadName'] };
   }
-  return `${t('errGeneric')} ${err instanceof Error ? err.message : String(err)}`;
+  return { keys: ['errGeneric'], detail: err instanceof Error ? err.message : String(err) };
+}
+
+export function formatError(info: ErrorInfo, t: (key: StringKey) => string): string {
+  const keys = info.keys.filter(isStringKey);
+  if (keys.length === 0) keys.push('errGeneric');
+  const base = keys.map((key) => t(key)).join('. ');
+  if (!info.detail) return base;
+  return keys[0] === 'errGeneric' ? `${base} ${info.detail}` : `${base} (${info.detail})`;
+}
+
+export function errorMessage(err: unknown, t: (key: StringKey) => string): string {
+  return formatError(describeError(err), t);
 }

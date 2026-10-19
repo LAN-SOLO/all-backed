@@ -51,7 +51,7 @@ export async function ensurePermission(
 ): Promise<void> {
   if ((await handle.queryPermission({ mode })) === 'granted') return;
   if ((await handle.requestPermission({ mode })) === 'granted') return;
-  throw new EngineError('permission-denied', `Permission (${mode}) denied for "${handle.name}"`);
+  throw new EngineError('permission-denied', `Permission (${mode}) denied for "${handle.name}"`, handle.name);
 }
 
 export async function fileExists(
@@ -73,8 +73,50 @@ export async function writeFile(
 ): Promise<void> {
   const handle = await dir.getFileHandle(name, { create: true });
   const writable = await handle.createWritable();
-  await writable.write(data);
-  await writable.close();
+  try {
+    await writable.write(data);
+    await writable.close();
+  } catch (err) {
+    await writable.abort().catch(() => {});
+    throw err;
+  }
+}
+
+/**
+ * Errors a short-lived lock on the destination produces — on Windows a
+ * virus scanner, the search indexer or OneDrive briefly holding the file (or
+ * Chrome's swap file while it is moved into place). Worth a retry.
+ */
+export function isTransientWriteError(err: unknown): boolean {
+  return (
+    err instanceof DOMException &&
+    (err.name === 'NoModificationAllowedError' || err.name === 'InvalidStateError')
+  );
+}
+
+/** Delays between write attempts (ms); exported for the self-test. */
+export const WRITE_RETRY_DELAYS = [150, 500, 1500];
+
+/**
+ * writeFile with retries on transient locks. Each attempt writes the whole
+ * file again and close() commits atomically, so a retry never produces a
+ * mixed or half file. Other errors (quota, permission) fail at once.
+ */
+export async function writeFileRetry(
+  dir: FileSystemDirectoryHandle,
+  name: string,
+  data: ArrayBuffer | Blob | string,
+  delays: number[] = WRITE_RETRY_DELAYS
+): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await writeFile(dir, name, data);
+      return;
+    } catch (err) {
+      if (!isTransientWriteError(err) || attempt >= delays.length) throw err;
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
 }
 
 export async function readFile(

@@ -7,6 +7,7 @@ import TaskView from './components/TaskView';
 import RestoreView from './components/RestoreView';
 import Help from './components/Help';
 import { Theme, detectTheme, saveTheme } from './theme';
+import { errorMessage } from './errors';
 
 type Selection = { kind: 'task'; id: string } | { kind: 'restore' } | { kind: 'none' };
 
@@ -42,7 +43,14 @@ export default function App() {
   // unmount it mid-run (the task could then be started twice or deleted
   // while it still writes), so navigation is locked until it finishes
   const [busy, setBusy] = useState(false);
+  // IndexedDB writes can fail (storage full, blocked site data) — say so
+  // instead of silently showing a state that is not saved
+  const [storeError, setStoreError] = useState<unknown>(null);
   const t = makeT(lang);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
 
   useEffect(() => {
     if (!busy) return;
@@ -55,14 +63,20 @@ export default function App() {
   }, [busy]);
 
   useEffect(() => {
-    loadTasks().then((loaded) => {
-      setTasks(loaded);
-      if (loaded.length > 0) setSelection({ kind: 'task', id: loaded[0].id });
-    });
+    loadTasks()
+      .then((loaded) => {
+        setTasks(loaded);
+        if (loaded.length > 0) setSelection({ kind: 'task', id: loaded[0].id });
+      })
+      .catch((err: unknown) => setStoreError(err));
   }, []);
 
   const switchLang = (next: Lang) => {
-    localStorage.setItem('ab-lang', next);
+    try {
+      localStorage.setItem('ab-lang', next);
+    } catch {
+      /* storage blocked — the switch still applies to this session */
+    }
     setLang(next);
   };
 
@@ -74,18 +88,37 @@ export default function App() {
 
   const addTask = useCallback(async () => {
     const task = newTask(lang === 'de' ? 'Neue Aufgabe' : 'New task');
-    await saveTask(task);
+    try {
+      await saveTask(task);
+    } catch (err) {
+      setStoreError(err);
+      return;
+    }
+    setStoreError(null);
     setTasks((prev) => [...prev, task]);
     setSelection({ kind: 'task', id: task.id });
   }, [lang]);
 
   const updateTask = async (task: BackupTask) => {
-    await saveTask(task);
+    // the UI follows the change either way (the running view needs it);
+    // a failed save is reported
     setTasks((prev) => prev.map((existing) => (existing.id === task.id ? task : existing)));
+    try {
+      await saveTask(task);
+      setStoreError(null);
+    } catch (err) {
+      setStoreError(err);
+    }
   };
 
   const removeTask = async (id: string) => {
-    await deleteTask(id);
+    try {
+      await deleteTask(id);
+    } catch (err) {
+      setStoreError(err);
+      return;
+    }
+    setStoreError(null);
     setTasks((prev) => {
       const remaining = prev.filter((task) => task.id !== id);
       setSelection(remaining.length > 0 ? { kind: 'task', id: remaining[0].id } : { kind: 'none' });
@@ -148,13 +181,21 @@ export default function App() {
   return (
     <div className="flex h-screen font-mono">
       {/* Sidebar */}
-      <aside className="flex w-80 shrink-0 flex-col border-r border-slate-700/60 light:border-slate-300 bg-slate-950/60 light:bg-white/70">
+      <aside className="flex w-60 shrink-0 flex-col md:w-72 xl:w-80 border-r border-slate-700/60 light:border-slate-300 bg-slate-950/60 light:bg-white/70">
         <div className="border-b border-slate-700/60 light:border-slate-300 p-4">
           <div className="text-2xl font-bold tracking-tight">
             <span className="text-primary-400 light:text-primary-700">all/backed</span>
             <span className="text-slate-100 light:text-slate-900">.</span>
           </div>
-          <div className="mt-1 text-xs text-slate-500 light:text-slate-600">{t('tagline')}</div>
+          <div className="mt-1 text-xs text-slate-500 light:text-slate-600">
+            {/* wrap only between flags, never inside "--encrypted" */}
+            {t('tagline').split(' ').map((word, i) => (
+              <span key={i} className="inline-block whitespace-nowrap">
+                {word}
+                {'\u00a0'}
+              </span>
+            ))}
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-3">
           <div className="mb-2 text-xs uppercase tracking-widest text-slate-500 light:text-slate-600">{t('tasks')}</div>
@@ -252,7 +293,13 @@ export default function App() {
 
       {/* Main */}
       <main className="flex min-w-0 flex-1 flex-col">
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
+          {storeError !== null && storeError !== undefined && (
+            <div className="card mx-auto mb-4 max-w-4xl break-words border-red-500/50 p-4 text-sm text-red-300 light:text-red-700" role="alert">
+              <span className="text-primary-400 light:text-primary-700">$</span> {t('errSaveFailed')}{' '}
+              {errorMessage(storeError, t)}
+            </div>
+          )}
           {selectedTask && (
             <TaskView
               key={selectedTask.id}
@@ -272,14 +319,14 @@ export default function App() {
         </div>
 
         {/* Norton-Commander-style function key bar */}
-        <footer className="flex items-center gap-1 border-t border-slate-700/60 light:border-slate-300 bg-slate-950/80 light:bg-white/80 px-3 py-2">
+        <footer className="flex flex-wrap items-center gap-1 border-t border-slate-700/60 light:border-slate-300 bg-slate-950/80 light:bg-white/80 px-3 py-2">
           {fkeys.map(({ key, label, onClick, locks }) => (
             <button
               key={key}
               onClick={onClick}
               disabled={busy && locks}
               title={busy && locks ? t('busyLocked') : undefined}
-              className="group disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-1.5 rounded px-2 py-1 text-xs text-slate-400 light:text-slate-600 transition-colors hover:bg-slate-800 light:hover:bg-slate-200 hover:text-slate-200 light:hover:text-slate-900"
+              className="group disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-1.5 whitespace-nowrap rounded px-2 py-1 text-xs text-slate-400 light:text-slate-600 transition-colors hover:bg-slate-800 light:hover:bg-slate-200 hover:text-slate-200 light:hover:text-slate-900"
             >
               <span className="rounded-sm bg-primary-600/90 px-1.5 py-0.5 font-bold text-white group-hover:bg-primary-600">
                 {key}
@@ -291,7 +338,9 @@ export default function App() {
           {selectedTask && (
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('ab:run'))}
-              className="btn-primary px-8 py-1.5"
+              disabled={busy}
+              title={busy ? t('busyLocked') : undefined}
+              className="btn-primary ml-auto px-6 py-1.5 md:px-8"
             >
               {t('start')}
             </button>

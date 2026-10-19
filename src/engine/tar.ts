@@ -7,6 +7,7 @@
 // contents, and parsing slices the source Blob instead of loading it whole.
 
 import { getDirByPath, walkFiles, writeFile } from './fsx';
+import { EngineError } from './types';
 
 const BLOCK = 512;
 const encoder = new TextEncoder();
@@ -161,7 +162,7 @@ export async function* iterTar(archive: Blob): AsyncGenerator<TarFileRef> {
     const prefix = readStr(345, 155);
     const sizeField = readStr(124, 12).trim();
     if (!/^[0-7]*$/.test(sizeField)) {
-      throw new Error(`not a valid tar archive (bad header at byte ${pos})`);
+      throw new EngineError('archive-invalid', `not a valid tar archive (bad header at byte ${pos})`);
     }
     let size = parseInt(sizeField || '0', 8);
     // header checksum: catches non-tar files and truncated/damaged archives
@@ -175,13 +176,13 @@ export async function* iterTar(archive: Blob): AsyncGenerator<TarFileRef> {
     }
     const stored = parseInt(readStr(148, 8).trim() || 'x', 8);
     if (stored !== sum && stored !== signedSum) {
-      throw new Error(`not a valid tar archive (checksum mismatch at byte ${pos})`);
+      throw new EngineError('archive-invalid', `not a valid tar archive (checksum mismatch at byte ${pos})`);
     }
     const typeflag = String.fromCharCode(head[156]);
     const isFile = typeflag === '0' || typeflag === '\0' || typeflag === '7';
     if (isFile && nextSize !== null) size = nextSize;
     if (pos + BLOCK + size > archive.size) {
-      throw new Error('tar archive is truncated');
+      throw new EngineError('archive-truncated', 'tar archive is truncated');
     }
     pos += BLOCK;
     if (typeflag === 'x' || typeflag === 'L') {
@@ -209,7 +210,7 @@ export async function* iterTar(archive: Blob): AsyncGenerator<TarFileRef> {
   }
   // every tar ends with zero blocks; a missing end marker means the
   // download/copy was cut off and later entries are missing
-  if (!ended) throw new Error('tar archive is truncated');
+  if (!ended) throw new EngineError('archive-truncated', 'tar archive is truncated');
 }
 
 /** Tar every file below `dir` (paths relative to `dir`), by reference. */
@@ -224,10 +225,12 @@ export async function tarDirectory(dir: FileSystemDirectoryHandle): Promise<Blob
 /** Unpack an archive into `dir`, creating subdirectories as needed. */
 export async function untarToDirectory(
   archive: Blob,
-  dir: FileSystemDirectoryHandle
+  dir: FileSystemDirectoryHandle,
+  signal?: AbortSignal
 ): Promise<number> {
   let count = 0;
   for await (const entry of iterTar(archive)) {
+    signal?.throwIfAborted();
     // zip-slip guard: '..' / '.' / empty segments are dropped, backslashes
     // (Windows-made archives) count as separators, drive letters are ignored
     const parts = entry.path

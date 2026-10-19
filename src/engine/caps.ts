@@ -71,3 +71,12 @@ export function downloadBlob(blob: Blob, filename: string): void {
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
+
+/**
+ * Local calendar date for download names (YYYY-MM-DD). toISOString() would
+ * give the UTC date — wrong between midnight and 01:00/02:00 in Germany.
+ */
+export function localDateStamp(date: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}

@@ -34,6 +34,7 @@ const STRINGS = {
     phaseManifest: 'writing manifest',
     phaseVerify: 'verifying',
     phaseRestore: 'restoring',
+    phaseImport: 'unpacking archive',
     done: 'done',
     restoreTitle: 'Restore',
     restoreIntro: 'Pick your backup destination folder — the one that contains the "allbacked" directory.',
@@ -126,6 +127,23 @@ const STRINGS = {
     busyLocked: 'A backup or restore is running — please wait until it has finished.',
     errBadName: 'This file or folder name is not allowed on this system (e.g. “a:b.txt” or “CON” on Windows)',
     errLocked: 'The file is locked by another program — close it and try again',
+    errCancelled: 'Cancelled',
+    errArchiveInvalid: 'This file is not an all/backed .tar archive (or it is damaged)',
+    errArchiveTruncated: 'The .tar archive is incomplete — the download or copy was cut off. Use the complete file',
+    errTypeMismatch: 'A file and a folder with the same name are in the way in the target folder',
+    errTargetInRepo: 'This folder belongs to the backup itself — choose a different target folder.',
+    errSaveFailed: 'The change could not be saved in browser storage:',
+    cancel: 'Cancel',
+    cancelling: 'cancelling…',
+    cancelledTitle: 'The backup was cancelled.',
+    cancelledNote:
+      'No new version was written; earlier versions are unchanged. Blocks already written are reused by the next run.',
+    restoreCancelled: 'Restore cancelled — files restored up to this point remain in the target folder.',
+    renamedFiles: 'files restored under a different name (the original name is not allowed on Windows/macOS or would collide):',
+    targetNotEmpty: 'The target folder is not empty:',
+    targetNotEmptyHint: 'Files with the same name will be overwritten. An empty folder is the safest choice.',
+    overwriteRestore: 'Overwrite & restore',
+    otherFolder: 'Choose another folder',
   },
   de: {
     tagline: '$ allbacked --free --local --encrypted',
@@ -157,6 +175,7 @@ const STRINGS = {
     phaseManifest: 'schreibe Manifest',
     phaseVerify: 'prüfe',
     phaseRestore: 'stelle wieder her',
+    phaseImport: 'entpacke Archiv',
     done: 'fertig',
     restoreTitle: 'Wiederherstellen',
     restoreIntro: 'Wählen Sie Ihren Backup-Zielordner — den Ordner, der das Verzeichnis „allbacked" enthält.',
@@ -204,7 +223,7 @@ const STRINGS = {
     confirmDelete: 'Wirklich löschen? Erneut klicken',
     fNew: 'Neue Aufgabe',
     fBackup: 'Backup',
-    fRestore: 'Restore',
+    fRestore: 'Wiederherstellen',
     fDelete: 'Löschen',
     fHelp: 'Hilfe',
     helpTitle: 'Hilfe & Handbuch (F1)',
@@ -249,15 +268,54 @@ const STRINGS = {
     busyLocked: 'Ein Backup oder eine Wiederherstellung läuft — bitte warten, bis sie fertig ist.',
     errBadName: 'Dieser Datei- oder Ordnername ist auf diesem System nicht erlaubt (z. B. „a:b.txt“ oder „CON“ unter Windows)',
     errLocked: 'Die Datei ist von einem anderen Programm gesperrt — bitte schließen und erneut versuchen',
+    errCancelled: 'Abgebrochen',
+    errArchiveInvalid: 'Diese Datei ist kein all/backed-.tar-Archiv (oder sie ist beschädigt)',
+    errArchiveTruncated: 'Das .tar-Archiv ist unvollständig — Download oder Kopie wurde abgeschnitten. Bitte die vollständige Datei verwenden',
+    errTypeMismatch: 'Im Zielordner steht eine Datei bzw. ein Ordner gleichen Namens im Weg',
+    errTargetInRepo: 'Dieser Ordner gehört zum Backup selbst — bitte einen anderen Zielordner wählen.',
+    errSaveFailed: 'Die Änderung konnte nicht im Browser-Speicher gesichert werden:',
+    cancel: 'Abbrechen',
+    cancelling: 'breche ab…',
+    cancelledTitle: 'Das Backup wurde abgebrochen.',
+    cancelledNote:
+      'Es wurde keine neue Version geschrieben; frühere Versionen sind unverändert. Bereits geschriebene Blöcke nutzt der nächste Lauf wieder.',
+    restoreCancelled: 'Wiederherstellung abgebrochen — bis dahin wiederhergestellte Dateien bleiben im Zielordner.',
+    renamedFiles: 'Dateien unter anderem Namen wiederhergestellt (der Originalname ist unter Windows/macOS unzulässig oder würde kollidieren):',
+    targetNotEmpty: 'Der Zielordner ist nicht leer:',
+    targetNotEmptyHint: 'Gleichnamige Dateien werden überschrieben. Am sichersten ist ein leerer Ordner.',
+    overwriteRestore: 'Überschreiben & wiederherstellen',
+    otherFolder: 'Anderen Ordner wählen',
   },
 } as const;
 
 export type StringKey = keyof (typeof STRINGS)['en'];
 
+/** Keys missing or empty in one of the languages (self-test). */
+export function missingTranslations(): string[] {
+  const keys = new Set([...Object.keys(STRINGS.en), ...Object.keys(STRINGS.de)]);
+  return [...keys].filter(
+    (key) => !(STRINGS.en as Record<string, string>)[key] || !(STRINGS.de as Record<string, string>)[key]
+  );
+}
+
+export function isStringKey(key: string): key is StringKey {
+  return Object.prototype.hasOwnProperty.call(STRINGS.en, key);
+}
+
+/**
+ * First start follows the browser/system language (navigator.languages —
+ * there is no LANG variable for a browser tab on macOS or Windows); the
+ * EN/DE toggle persists. Storage may be unavailable (blocked site data).
+ */
 export function detectLang(): Lang {
-  const stored = localStorage.getItem('ab-lang');
-  if (stored === 'de' || stored === 'en') return stored;
-  return navigator.language.toLowerCase().startsWith('de') ? 'de' : 'en';
+  try {
+    const stored = localStorage.getItem('ab-lang');
+    if (stored === 'de' || stored === 'en') return stored;
+  } catch {
+    /* storage blocked — fall back to the browser language */
+  }
+  const preferred = navigator.languages?.[0] ?? navigator.language ?? 'en';
+  return preferred.toLowerCase().startsWith('de') ? 'de' : 'en';
 }
 
 export function makeT(lang: Lang) {

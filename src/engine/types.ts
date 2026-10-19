@@ -57,8 +57,17 @@ export interface RunSummary {
   verifiedOk: boolean;
   durationMs: number;
   encrypted: boolean;
-  /** Set when the run failed; the other counters are then 0. */
+  /**
+   * Set when the run failed; the other counters are then 0. Text in the UI
+   * language at the time of the failure (kept for tasks saved before 1.0
+   * round 2 — newer runs also store `errorInfo`).
+   */
   error?: string;
+  /**
+   * Language-neutral failure description (i18n keys + technical detail), so
+   * the "Last run" card follows a later EN/DE switch.
+   */
+  errorInfo?: { keys: string[]; detail?: string };
   /** Files/folders skipped because they were locked, changed or deleted. */
   skippedCount?: number;
   /** The first skipped entries (capped), folder paths end with '/'. */
@@ -121,8 +130,15 @@ export class EngineError extends Error {
       | 'permission-denied'
       | 'repo-invalid'
       | 'manifest-invalid'
-      | 'block-corrupt',
-    message: string
+      | 'block-corrupt'
+      | 'archive-invalid'
+      | 'archive-truncated',
+    message: string,
+    /**
+     * Language-neutral detail the UI may show next to the translated text
+     * (a file name, a block id) — never an English sentence.
+     */
+    public detail?: string
   ) {
     super(message);
     this.name = 'EngineError';

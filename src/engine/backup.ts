@@ -9,7 +9,7 @@ import {
   SkippedFile,
 } from './types';
 import { sha256Hex } from './crypto';
-import { fileExists, isSkippableReadError, walkFiles, writeFile, readFile } from './fsx';
+import { fileExists, isSkippableReadError, walkFiles, writeFileRetry, readFile } from './fsx';
 import { OpenRepo, decodeBlock, encodeBlock, openOrInitRepo, writeManifest } from './repo';
 
 /**
@@ -36,6 +36,12 @@ export interface BackupOptions {
   chunkSize?: number;
   verifySamples?: number;
   onProgress?: ProgressFn;
+  /**
+   * Cancels the run between files/blocks (throws the signal's AbortError).
+   * Blocks written so far stay (they are complete and deduplicate the next
+   * run); no manifest is written, so no half version appears.
+   */
+  signal?: AbortSignal;
 }
 
 async function blockDir(repo: OpenRepo, hash: string, create: boolean) {
@@ -49,7 +55,7 @@ async function storeChunk(
 ): Promise<'new' | 'dedup'> {
   const dir = await blockDir(repo, hash, true);
   if (await fileExists(dir, hash)) return 'dedup';
-  await writeFile(dir, hash, await encodeBlock(repo, plain));
+  await writeFileRetry(dir, hash, await encodeBlock(repo, plain));
   return 'new';
 }
 
@@ -72,10 +78,10 @@ async function verifySamples(
       const dir = await blockDir(repo, hash, false);
       plain = await decodeBlock(repo, await readFile(dir, hash));
     } catch {
-      throw new EngineError('verify-failed', `Block ${hash.slice(0, 12)}… failed verification.`);
+      throw new EngineError('verify-failed', `Block ${hash.slice(0, 12)}… failed verification.`, `${hash.slice(0, 12)}…`);
     }
     if ((await sha256Hex(plain)) !== hash) {
-      throw new EngineError('verify-failed', `Block ${hash.slice(0, 12)}… failed verification.`);
+      throw new EngineError('verify-failed', `Block ${hash.slice(0, 12)}… failed verification.`, `${hash.slice(0, 12)}…`);
     }
   }
 }
@@ -83,6 +89,8 @@ async function verifySamples(
 export async function runBackup(options: BackupOptions): Promise<RunSummary> {
   const started = performance.now();
   const chunkSize = options.chunkSize ?? DEFAULT_CHUNK_SIZE;
+  const signal = options.signal;
+  signal?.throwIfAborted();
   const repo = await openOrInitRepo(
     options.dest,
     options.taskName,
@@ -146,6 +154,7 @@ export async function runBackup(options: BackupOptions): Promise<RunSummary> {
       if (duplicate) continue;
       seenHandles.push(source.handle);
       for await (const item of walkFiles(source.handle, uniqueRoot(source.handle.name), skip)) {
+        signal?.throwIfAborted();
         let file: File;
         try {
           file = await item.handle.getFile();
@@ -185,6 +194,7 @@ export async function runBackup(options: BackupOptions): Promise<RunSummary> {
   let totalBytes = 0;
 
   plan: for (const entry of plan) {
+    signal?.throwIfAborted();
     report({ phase: 'backup', path: entry.path });
     // a file that is locked (e.g. an open Outlook .pst on Windows), changed
     // mid-read or deleted since the scan is skipped and listed — one busy
@@ -213,6 +223,7 @@ export async function runBackup(options: BackupOptions): Promise<RunSummary> {
         continue plan;
       }
       if (plain.byteLength === 0 && offset > 0) break;
+      signal?.throwIfAborted();
       const hash = await sha256Hex(plain);
       const stored = await storeChunk(repo, hash, plain);
       if (stored === 'new') progress.newBlocks += 1;
@@ -237,9 +248,12 @@ export async function runBackup(options: BackupOptions): Promise<RunSummary> {
   };
   // verify BEFORE the manifest is written: a run whose blocks don't read
   // back never shows up as a restorable version
+  signal?.throwIfAborted();
   report({ phase: 'verify', path: undefined });
   await verifySamples(repo, manifest, options.verifySamples ?? 5);
 
+  // last point to cancel — once the manifest is written the run is done
+  signal?.throwIfAborted();
   report({ phase: 'manifest' });
   const manifestName = await writeManifest(repo, manifest);
 

@@ -110,7 +110,7 @@ const de: Content = {
         'Zu jeder Quelle zeigt all/backed Dateizahl und Gesamtgröße; mehrere Quellen werden in einem Lauf zusammen gesichert. Derselbe Ordner lässt sich nicht doppelt hinzufügen. Haben zwei Quellen denselben Namen (z. B. zweimal „Dokumente“ von verschiedenen Laufwerken), landet die zweite im Backup als „Dokumente (2)“ — nichts wird überschrieben.',
         'Im Archiv-Modus (Safari/Firefox) gelten hinzugefügte Quellen für die laufende Sitzung — nach einem Neuladen wählen Sie sie neu.',
         'Der Statuspunkt in der Seitenleiste zeigt den letzten Lauf: grün = Verify OK, rot = fehlgeschlagen (der Grund steht in der Karte „Letzter Lauf“), leerer Ring = noch nie gesichert.',
-        'Während ein Backup oder eine Wiederherstellung läuft, sind Name, Quellen, Ziel und Löschen gesperrt — ebenso der Wechsel zu einer anderen Aufgabe, eine neue Aufgabe und die Wiederherstellen-Ansicht. Beim Schließen des Tabs fragt der Browser nach.',
+        'Während ein Backup oder eine Wiederherstellung läuft, sind Name, Quellen, Ziel und Löschen gesperrt — ebenso der Wechsel zu einer anderen Aufgabe, eine neue Aufgabe und die Wiederherstellen-Ansicht. Beenden lässt sich ein Lauf jederzeit mit [Abbrechen]. Beim Schließen des Tabs fragt der Browser nach.',
       ],
     },
     {
@@ -147,6 +147,8 @@ const de: Content = {
         'Schlägt ein Lauf fehl, bleiben frühere Versionen unverändert und weiterhin wiederherstellbar. Die neue Version erscheint erst, wenn die Prüfung bestanden ist.',
         'Gesichert werden Dateien mit Inhalt und relativem Pfad. Leere Ordner, Dateirechte und Änderungszeiten werden beim Wiederherstellen nicht nachgebildet.',
         'Ist eine Datei während des Laufs gesperrt (z. B. eine geöffnete Outlook-.pst unter Windows), wird sie beim Lesen geändert oder zwischendurch gelöscht, oder ist ein Unterordner nicht lesbar, überspringt all/backed nur diese Einträge. Banner und Karte „Letzter Lauf“ listen sie gelb auf; sie fehlen in dieser Version — Programm schließen und erneut sichern. Fehlende Zugriffsrechte brechen den Lauf dagegen ab.',
+        '[Abbrechen] im Kopf des Terminal-Protokolls stoppt den Lauf nach dem aktuellen Block. Es entsteht keine neue Version, frühere Versionen bleiben unverändert, und die Karte „Letzter Lauf“ zeigt weiter den vorigen Lauf. Bereits geschriebene Blöcke sind vollständig und werden beim nächsten Lauf wiederverwendet.',
+        'Ist das Ziel-Laufwerk kurz gesperrt (unter Windows etwa durch Virenscanner, Suchindex oder OneDrive), versucht all/backed das Schreiben eines Blocks bis zu dreimal erneut, bevor der Lauf mit einer Meldung endet.',
       ],
     },
     {
@@ -157,8 +159,10 @@ const de: Content = {
         'In Chrome wählen Sie den Backup-Zielordner — den Ordner, der das Verzeichnis „allbacked“ enthält. all/backed durchsucht ihn und listet alle gefundenen Backups auf (eines je Aufgabe).',
         'Im Archiv-Modus wählen Sie stattdessen das heruntergeladene .tar-Archiv; es wird lokal entpackt und genauso durchsucht.',
         'Verschlüsselte Backups sind als „verschlüsselt“ markiert und fragen nach der Passphrase; sie wird sofort gegen die neueste Version geprüft.',
-        'Jeder Backup-Lauf erscheint als Version mit Zeitstempel. „Diese Version wiederherstellen“ fragt nach dem Zielordner und stellt die Dateien dorthin wieder her. Gleichnamige Dateien im Zielordner werden überschrieben — am sichersten ist ein leerer Ordner.',
-        'Jeder Block wird beim Wiederherstellen gegen seine Prüfsumme geprüft. Lässt sich eine Datei nicht herstellen (beschädigter Block, auf diesem System unzulässiger Dateiname wie „a:b.txt“ unter Windows), wird sie übersprungen und unten aufgelistet; alle anderen Dateien werden trotzdem wiederhergestellt. Halbe Dateien entstehen nie.',
+        'Jeder Backup-Lauf erscheint als Version mit Zeitstempel (in Ihrer Ortszeit). „Diese Version wiederherstellen“ fragt nach dem Zielordner und stellt die Dateien dorthin wieder her.',
+        'Ist der Zielordner nicht leer, zeigt all/backed zuerst, was darin liegt, und fragt nach: „Überschreiben & wiederherstellen“ ersetzt gleichnamige Dateien, „Anderen Ordner wählen“ öffnet die Auswahl neu, „Abbrechen“ schreibt nichts. Am sichersten ist ein leerer Ordner. Einen Ordner innerhalb des Backups selbst (allbacked/…) lehnt all/backed als Ziel ab.',
+        'Dateinamen, die Windows oder macOS nicht zulassen („a:b.txt“, „Notiz?.md“, „CON.txt“, Namen mit Punkt oder Leerzeichen am Ende), werden mit „_“ statt des Zeichens wiederhergestellt („a_b.txt“, „_CON.txt“). Dateien, die sich nur in Groß-/Kleinschreibung unterscheiden (z. B. von Linux), bekommen eine Nummer („readme (2).txt“) statt sich gegenseitig zu überschreiben. Alle umbenannten Dateien listet all/backed nach dem Lauf mit altem und neuem Namen.',
+        'Jeder Block wird beim Wiederherstellen gegen seine Prüfsumme geprüft. Lässt sich eine Datei nicht herstellen (beschädigter Block, gesperrte Zieldatei), wird sie übersprungen und unten aufgelistet; alle anderen Dateien werden trotzdem wiederhergestellt. Halbe Dateien entstehen nie — auch nicht bei [Abbrechen]: Die gerade geschriebene Datei wird verworfen, bereits fertige bleiben im Zielordner.',
         'Im Archiv-Modus wird das Ergebnis als restored-<datum>.tar heruntergeladen — entpacken Sie es, um Ihre Dateien zu erhalten. Die entpackten Zwischendaten im Browser-Speicher löscht all/backed beim nächsten Start.',
       ],
     },
@@ -183,6 +187,7 @@ const de: Content = {
         '• F6 — Wiederherstellen öffnen',
         '• F8 — Aufgabe löschen (zweimal drücken, zur Sicherheit)',
         'Im Tutorial blättern die Pfeiltasten ← →; Esc schließt die Hilfe.',
+        'Mac-Tastaturen: Steuern F1–F12 Helligkeit oder Lautstärke, halten Sie zusätzlich die fn-Taste gedrückt (oder stellen Sie in den Systemeinstellungen → Tastatur „F1, F2 usw. als Standard-Funktionstasten verwenden“ ein). Alle Funktionen sind auch per Klick auf die Fußleiste erreichbar.',
       ],
     },
     {
@@ -291,7 +296,7 @@ const en: Content = {
         'For each source, all/backed shows file count and total size; multiple sources are backed up together in one run. The same folder cannot be added twice. If two sources share a name (e.g. two “Documents” folders from different drives), the second is stored as “Documents (2)” — nothing gets overwritten.',
         'In archive mode (Safari/Firefox), added sources apply to the current session — after a reload, pick them again.',
         'The status dot in the sidebar reflects the last run: green = verify OK, red = failed (the reason is shown in the “Last run” card), empty ring = never backed up.',
-        'While a backup or restore is running, name, sources, destination and delete are locked — and so are switching to another task, creating a task and the restore view. Closing the tab asks for confirmation.',
+        'While a backup or restore is running, name, sources, destination and delete are locked — and so are switching to another task, creating a task and the restore view. [Cancel] stops a run at any time. Closing the tab asks for confirmation.',
       ],
     },
     {
@@ -328,6 +333,8 @@ const en: Content = {
         'If a run fails, earlier versions remain unchanged and restorable. The new version only appears once verification has passed.',
         'Backed up are files with their content and relative path. Empty folders, permissions and modification times are not recreated on restore.',
         'If a file is locked during the run (e.g. an open Outlook .pst on Windows), changes while it is being read or is deleted meanwhile, or a subfolder cannot be read, all/backed skips just those entries. The banner and the “Last run” card list them in yellow; they are missing from this version — close the program and back up again. Missing access rights, on the other hand, stop the run.',
+        '[Cancel] in the header of the terminal log stops the run after the current block. No new version is created, earlier versions stay unchanged, and the “Last run” card keeps showing the previous run. Blocks already written are complete and are reused by the next run.',
+        'If the destination drive is briefly locked (on Windows e.g. by a virus scanner, the search indexer or OneDrive), all/backed retries writing a block up to three times before the run ends with a message.',
       ],
     },
     {
@@ -338,8 +345,10 @@ const en: Content = {
         'In Chrome, pick your backup destination folder — the one containing the “allbacked” directory. all/backed scans it and lists every backup it finds (one per task).',
         'In archive mode, pick the downloaded .tar archive instead; it is unpacked locally and scanned the same way.',
         'Encrypted backups are marked “encrypted” and ask for the passphrase; it is validated immediately against the newest version.',
-        'Every backup run appears as a version with a timestamp. “Restore this version” asks for a target folder and restores the files into it. Files with the same name in the target folder are overwritten — an empty folder is the safest choice.',
-        'Every block is checked against its checksum during restore. If a file cannot be restored (damaged block, a file name this system does not allow such as “a:b.txt” on Windows), it is skipped and listed below; all other files are still restored. Half-written files never remain.',
+        'Every backup run appears as a version with a timestamp (in your local time). “Restore this version” asks for a target folder and restores the files into it.',
+        'If the target folder is not empty, all/backed first shows what is in it and asks: “Overwrite & restore” replaces files with the same name, “Choose another folder” opens the picker again, “Cancel” writes nothing. An empty folder is the safest choice. A folder inside the backup itself (allbacked/…) is refused as a target.',
+        'File names Windows or macOS do not allow (“a:b.txt”, “note?.md”, “CON.txt”, names ending in a dot or space) are restored with “_” in place of the character (“a_b.txt”, “_CON.txt”). Files that differ only in upper/lower case (e.g. from Linux) get a number (“readme (2).txt”) instead of overwriting each other. all/backed lists every renamed file with its old and new name after the run.',
+        'Every block is checked against its checksum during restore. If a file cannot be restored (damaged block, locked target file), it is skipped and listed below; all other files are still restored. Half-written files never remain — not even with [Cancel]: the file being written is discarded, finished ones stay in the target folder.',
         'In archive mode, the result is downloaded as restored-<date>.tar — unpack it to get your files. all/backed deletes the unpacked staging data in browser storage on its next start.',
       ],
     },
@@ -364,6 +373,7 @@ const en: Content = {
         '• F6 — open restore',
         '• F8 — delete the task (press twice, as a safeguard)',
         'In the tutorial, the arrow keys ← → page through the steps; Esc closes the help.',
+        'Mac keyboards: if F1–F12 control brightness or volume, also hold the fn key (or turn on “Use F1, F2, etc. keys as standard function keys” in System Settings → Keyboard). Every function can also be clicked in the footer bar.',
       ],
     },
     {
@@ -397,6 +407,22 @@ const en: Content = {
 };
 
 const SEEN_KEY = 'ab.tutorialSeen';
+
+function tutorialSeen(): boolean {
+  try {
+    return Boolean(localStorage.getItem(SEEN_KEY));
+  } catch {
+    return false;
+  }
+}
+
+function markTutorialSeen(): void {
+  try {
+    localStorage.setItem(SEEN_KEY, '1');
+  } catch {
+    /* storage blocked */
+  }
+}
 
 function Body({ lines }: { lines: string[] }) {
   return (
@@ -435,7 +461,7 @@ export default function Help({
   }, [lang]);
   const c = helpLang === 'de' ? de : en;
   const [mode, setMode] = useState<'closed' | 'tutorial' | 'manual'>(() =>
-    localStorage.getItem(SEEN_KEY) ? 'closed' : 'tutorial'
+    tutorialSeen() ? 'closed' : 'tutorial'
   );
   const [step, setStep] = useState(0);
   const [sel, setSel] = useState(c.sections[0].id);
@@ -453,7 +479,7 @@ export default function Help({
   }, []);
 
   const close = () => {
-    localStorage.setItem(SEEN_KEY, '1');
+    markTutorialSeen();
     setMode('closed');
     setStep(0);
   };
@@ -465,7 +491,7 @@ export default function Help({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape' || event.key === 'F1') {
         event.preventDefault();
-        localStorage.setItem(SEEN_KEY, '1');
+        markTutorialSeen();
         setMode('closed');
         setStep(0);
       } else if (mode === 'tutorial') {
@@ -600,7 +626,7 @@ export default function Help({
 
         {mode === 'manual' && (
           <div className="flex min-h-0 flex-1">
-            <div className="flex w-56 shrink-0 flex-col border-r border-slate-700/60 light:border-slate-300">
+            <div className="flex w-40 shrink-0 flex-col border-r sm:w-56 border-slate-700/60 light:border-slate-300">
               <div className="p-3">
                 <input
                   type="text"

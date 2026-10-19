@@ -101,9 +101,10 @@ Keine neuen Abhängigkeiten. Testinfrastruktur nutzt nur vorhandenes Vite + Node
 
 - Gesichert werden Dateiinhalte mit relativem Pfad — **keine leeren Ordner,
   Dateirechte, Änderungszeiten, Symlinks** (FS-Access-API bietet sie nicht).
-- Restore **überschreibt** gleichnamige Dateien im Zielordner (leeren Ordner
-  wählen). Dateinamen, die das Ziel-Dateisystem verbietet (z. B. `a:b.txt`,
-  `CON` unter Windows), werden übersprungen und gelistet.
+- Restore **überschreibt** gleichnamige Dateien im Zielordner — seit Runde 2
+  erst nach ausdrücklicher Rückfrage (Inhaltsvorschau). Dateinamen, die
+  Windows/macOS verbieten (z. B. `a:b.txt`, `CON`), werden seit Runde 2
+  umbenannt (`a_b.txt`, `_CON`) und gelistet statt übersprungen.
 - ~~Zwei Aufgaben mit gleichem Namen teilen sich den Repository-Ordner~~ —
   seit der Verifikation (V3) bekommt eine Aufgabe beim ersten Lauf einen
   Ordnernamen, den keine andere Aufgabe festgeschrieben hat (`<name>-2`).
@@ -150,7 +151,9 @@ Backup (Chrome)
 Restore (Chrome)
 - [ ] F6 → Backup-Ort wählen → Repo gefunden, „verschlüsselt", falsche Passphrase abgelehnt, richtige → Versionen
 - [ ] Version in leeren Ordner wiederherstellen → Dateien byte-gleich (macOS: `diff -r`, Windows: `fc /b` oder Explorer-Vergleich), Umlaute korrekt
-- [ ] Backup von macOS mit Datei `a:b.txt` unter Windows wiederherstellen → Datei gelistet als übersprungen, Rest vollständig
+- [ ] Backup von macOS mit Datei `a:b.txt` unter Windows wiederherstellen → Datei als `a_b.txt` wiederhergestellt und in der gelben Liste „unter anderem Namen“ geführt, Rest vollständig
+- [ ] Restore in einen nicht leeren Ordner → Rückfrage mit Inhaltsvorschau; „Abbrechen“ schreibt nichts, „Überschreiben & wiederherstellen“ stellt her
+- [ ] Großes Backup / großer Restore → [Abbrechen] im Protokoll: Banner „abgebrochen“ (gelb), keine neue Version, keine halbe Datei im Ziel; nächster Lauf dedupliziert
 
 Archiv-Modus (Firefox, sowie Chrome mit `?fallback`)
 - [ ] Ordner wählen (Dialog „Hochladen" — Hinweistext sichtbar) und per Drag & Drop
@@ -214,3 +217,76 @@ in echtem Chromium grün). Version 1.0.0 in `package.json`, `public/manifest.jso
   bis der Repository-Ordner ersetzt wird. Fail-loud ist gewollt; eine
   Selbstheilung ist für nach 1.0 vorgemerkt.
 - S13–S15 unverändert (Format v1, Dev-Abhängigkeiten).
+
+## 8. Runde 2 (2026-10-20)
+
+Basis `39a79bc`. Ziel: jede Funktion fehlerfrei auf Windows und macOS,
+sicher. all/backed ist eine Browser-Extension — Tauri-spezifische Punkte
+(Dialog-Plugin, Rust-Backend, Updater, `cargo audit`, Windows-`cargo check`)
+entfallen; die übertragbaren Muster L1–L13 wurden auf Browser-Ebene geprüft.
+
+### 8.1 Was tatsächlich ausgeführt wurde
+
+| Weg | Ergebnis |
+| --- | --- |
+| `pnpm test` (Node + memfs, jetzt mit Windows-Namensregeln und APFS/NTFS-artiger Groß-/Kleinschreibung + NFC/NFD-Gleichsetzung) | PASS — Basis + R1–R8, R10–R17 |
+| `await window.abSelfTest()` in echtem Chromium (`chrome-headless-shell`, echtes OPFS, per CDP) | PASS — alle Schritte inkl. R12–R17 |
+| Negativkontrollen | R12 mit altem Restore-Pfad: FAIL (`a:b.txt`, `CON.txt`, `draft.`, `what?/x.txt` scheitern; `readme.txt` überschreibt `README.txt`, NFD überschreibt NFC). R15 ohne Fix: FAIL („falsche Passphrase“ durch Streudatei) |
+| UI-Läufe in Chromium, Direktmodus (Ordner-Picker per Stub auf OPFS-Ordner) | DE dunkel 760×520, EN hell 640×480, EN dunkel 1280×800, DE hell 760×520: Aufgabe anlegen, Quelle (Umlaute/Leerzeichen, 41 Dateien/40 MiB), Ziel, Passphrase, Backup OK; zweiter Lauf mit 120 Dateien → [Abbrechen] → gelbes Banner, Navigation wieder frei, keine Version; falsche Passphrase → rot; Sprachwechsel → Karte „Letzter Lauf“ wechselt mit; Restore: Repo gefunden, entsperrt, Ziel in `allbacked/…/blocks` abgelehnt, nicht leeres Ziel → Rückfrage (`.DS_Store` ignoriert), „Abbrechen“ schreibt nichts, „Überschreiben“ stellt 41 Dateien her (Umlaut-Inhalt geprüft); kein horizontaler Überlauf |
+| UI-Läufe in Chromium, Archiv-Modus (`?fallback`) | DE dunkel / EN hell 760×520: Backup → `allbacked-neue-aufgabe-2026-10-20.tar` (lokales Datum; UTC war noch der 19.), Müll-Datei und abgeschnittenes `.tar` → übersetzte Meldungen, Import → Manifest mit `a:b.txt`, `CON.txt`, `README.txt`/`readme.txt`, `frage?.txt`, `ende.` → `restored-2026-10-20.tar` enthält `a_b.txt`, `_CON.txt`, `readme (2).txt`, `frage_.txt`, `ende_`, Liste der 5 Umbenennungen sichtbar |
+| Chromium-OPFS nachgemessen | OPFS (macOS) akzeptiert `a:b.txt`, `CON`, `x?.txt`, `end.` und ist case-sensitiv — ohne den Fix landeten solche Namen unverändert im `restored-*.tar` und scheiterten erst beim Entpacken unter Windows |
+| `pnpm typecheck` / `pnpm build` / `pnpm build:firefox` | fehlerfrei |
+| `pnpm audit --prod` | keine Befunde (Laufzeit nur react/react-dom) |
+
+### 8.2 Behobene Fehler
+
+| # | Muster | Schwere | Fehler | Fix |
+| --- | --- | --- | --- | --- |
+| W1 | L5 | hoch | Restore schrieb Namen unverändert: `a:b.txt`, `CON.txt`, `x?.md`, `draft.` scheiterten unter Windows (bzw. im Archiv-Modus erst beim Entpacken), `readme.txt` **überschrieb** `README.txt` auf APFS/NTFS, NFD-„ü“ überschrieb NFC-„ü“ | `src/engine/portable.ts`: Zielnamen werden in der Engine vor dem Schreiben festgelegt (verbotene Zeichen → `_`, reservierte Namen → `_CON`, Punkt/Leerzeichen am Ende → `_`, Kollisionen nach Fold/NFC → `name (2).ext`, Ordner/Datei-Kollision nummeriert); `RestoreResult.renamed` + gelbe Liste — R12 |
+| W2 | L11 | mittel | Restore in einen nicht leeren Ordner überschrieb gleichnamige Dateien **ohne Rückfrage**; ein Ziel innerhalb des Repositories (z. B. `allbacked/x/blocks`) war erlaubt und hätte Wiederhergestelltes zwischen die Blöcke geschrieben | `inspectRestoreTarget`: Ziel im Repository → abgelehnt; nicht leer → Rückfrage mit Vorschau („Überschreiben & wiederherstellen“ / „Anderen Ordner wählen“ / „Abbrechen“), OS-Streudateien zählen nicht — R16, UI-Lauf |
+| W3 | L9 | mittel | Laufende Backups/Restores ließen sich **nicht abbrechen** — nur Tab schließen. Ein 500-GB-Lauf war damit nicht kontrolliert beendbar | `AbortSignal` in `runBackup`, `runRestore`, `untarToDirectory`; [Abbrechen] im Protokoll bzw. in der Restore-Fortschrittszeile. Abgebrochenes Backup: kein Manifest, Blöcke bleiben (Dedup), „Letzter Lauf“ unverändert, gelbes Banner. Abgebrochener Restore: aktuelle Datei verworfen (`abort()`, neu angelegte entfernt) — R13, UI-Lauf |
+| W4 | L5 | mittel | Kurze Sperren auf dem Ziel (Virenscanner, Suchindex, OneDrive unter Windows) ließen den ganzen Lauf scheitern | `writeFileRetry`: bis zu 3 Wiederholungen (150/500/1500 ms) bei `NoModificationAllowedError`/`InvalidStateError`, jede Wiederholung schreibt die ganze Datei atomar neu; andere Fehler (Quota, Rechte) sofort — R14 |
+| W5 | L5 | mittel | Passphrase-Prüfung vor dem ersten Manifest las „die erste Datei“ in `blocks/` — eine liegengebliebene `<hash>.crswap` (Chrome-Swapdatei nach Absturz) oder `.DS_Store` ergab dauerhaft „falsche Passphrase“ | nur Namen mit 64 Hex-Zeichen zählen als Block — R15 (Negativkontrolle FAIL ohne Fix) |
+| W6 | L2 | niedrig | `.tar`-Fehler („not a valid tar archive…“, „tar archive is truncated“) erschienen englisch im deutschen UI; Engine-Details in Klammern waren englische Sätze („Block … is damaged.“) | Tar-Fehler als `EngineError` (`archive-invalid`/`archive-truncated`) mit DE/EN-Text; `EngineError.detail` trägt nur sprachneutrale Angaben (Dateiname, Block-ID); `TypeMismatchError`, `InvalidStateError`, `AbortError` gemappt — R17 |
+| W7 | L2/L12 | niedrig | Die Karte „Letzter Lauf“ zeigte den Fehler in der Sprache zum Zeitpunkt des Fehlers (nach EN/DE-Wechsel gemischt) | `RunSummary.errorInfo` (i18n-Schlüssel + Detail) wird gespeichert und bei jeder Anzeige übersetzt; alte Einträge zeigen weiter ihren Text — UI-Lauf |
+| W8 | L10 | niedrig | Download-Namen `allbacked-<aufgabe>-<datum>.tar` / `restored-<datum>.tar` nutzten das **UTC-Datum** — zwischen 0 und 1/2 Uhr (MEZ/MESZ) der Vortag | `localDateStamp()` (lokales Kalenderdatum) — im UI-Lauf um 01:18 MESZ nachgewiesen |
+| W9 | — (UI) | mittel | Kleine Fenster (≤ 800 px): Seitenleiste fix 320 px, Karten-Raster dreispaltig ab 640 px **Viewport** → Karten 108 px breit, Texte zeichenweise umbrochen, **horizontaler Seiten-Überlauf** (936 px Inhalt bei 760 px Fenster), F-Leiste abgeschnitten (F8 unsichtbar), „Aufgabe löschen“ zweizeilig | Seitenleiste 240/288/320 px (bis md/xl), Raster erst ab `lg` dreispaltig, F-Leiste umbricht, Start-Knopf rechts, Löschen-Knopf ohne Umbruch, Tagline bricht nur zwischen Flags; Banner, Protokoll, Rückfrage und Ergebnis scrollen bei Erscheinen ins Bild. Nachgemessen: kein Überlauf bei 640/760/1280 px |
+| W10 | L11 | niedrig | IndexedDB-Fehler beim Speichern/Löschen einer Aufgabe gingen als „unhandled rejection“ verloren (Anzeige zeigte einen nicht gespeicherten Zustand) | App fängt sie und zeigt „Die Änderung konnte nicht gesichert werden: …“ |
+| W11 | L3 | niedrig | `localStorage`-Zugriffe ungeschützt (blockierte Website-Daten → weiße Seite); Erstsprache nur aus `navigator.language` | alle Zugriffe in `try/catch`; Erstsprache aus `navigator.languages[0]`; `<html lang>` folgt der Sprache |
+| W12 | L12 | niedrig | DE-F-Leiste zeigte „Restore“ | „Wiederherstellen“ |
+| W13 | L6 | info | macOS-Tastaturen: F1–F12 steuern standardmäßig Helligkeit/Lautstärke | Hilfe nennt fn bzw. die Systemeinstellung; alle F-Funktionen sind klickbar. Keine Strg/⌘-Kürzel in der App (geprüft) |
+
+Hilfe (DE + EN) angepasst: Abbrechen (Aufgaben, Backup, Restore),
+Wiederholungen bei Laufwerkssperren, Rückfrage bei nicht leerem Ziel, Ziel
+im Backup abgelehnt, Umbenennung unzulässiger/kollidierender Namen,
+Zeitstempel in Ortszeit, fn-Taste am Mac. README ergänzt.
+
+### 8.3 Muster L1–L13 — Ergebnis für all/backed
+
+| Muster | Ergebnis |
+| --- | --- |
+| L1 Dialog-Plugin-Stubs | entfällt (kein Tauri). Kein `confirm`/`alert`/`prompt` im Code; Bestätigungen sind eigene UI (Löschen: zweiter Klick binnen 3 s; Restore-Ziel: Rückfrage-Karte) |
+| L2 Rohe Fehlertexte | behoben (W6, W7); verbleibend nur der Rückfall „Da ist etwas schiefgelaufen: <Rohtext>“ für unbekannte Browser-Fehler |
+| L3 Erstsprache | OK (`navigator.languages`), W11 |
+| L4 CSV/BOM | entfällt (kein CSV/JSON-Import/Export); `.tar`-Import prüft Header-Prüfsummen |
+| L5 Windows-Dateisystem | W1, W4, W5. Laufwerkswurzeln/lange Pfade/gesperrte Quelldateien: Browser-API, nur manuell prüfbar |
+| L6 Kürzel-Beschriftung | OK, nur F-Tasten (W13) |
+| L7 Fremdinhalte | OK: keine Netzzugriffe, kein HTML-Rendering fremder Inhalte, Standard-MV3-CSP |
+| L8 Schwere Arbeit im UI-Thread | OK: SHA-256, AES-GCM, PBKDF2 (600k) über WebCrypto, gzip über CompressionStream — alles asynchron; UI blieb im 40-MiB-Lauf bedienbar ([Abbrechen] reagierte) |
+| L9 Lange Aufgaben | W3; Navigation-Sperre und `beforeunload` aus Runde 1 bestehen |
+| L10 Zeitstempel | W8; Versionsliste zeigt Ortszeit (Manifestname ist UTC-ISO, wird lokal formatiert); tar-mtime ist Epoch (UTC, korrekt) |
+| L11 Destruktive Aktionen | W2, W10 |
+| L12 Texte DE/EN, Hilfe | R17 prüft Schlüsselgleichheit; W12; Hilfe aktualisiert |
+| L13 Updater | entfällt (Updates über Chrome Web Store/AMO) |
+
+### 8.4 Nur auf echter Hardware prüfbar
+
+- Windows (Chrome): ob Chromium beim Schreiben in echte NTFS-Ordner weitere
+  Namen ablehnt als die nun vorab umbenannten; Pfade > 260 Zeichen; Ziel auf
+  Laufwerksbuchstaben/Laufwerkswurzel; Virenscanner-/OneDrive-Sperren
+  (welchen `DOMException`-Namen Chrome dabei liefert — der Retry deckt
+  `NoModificationAllowedError`/`InvalidStateError` ab).
+- macOS (Chrome): Restore auf APFS (case-insensitiv) mit `README.txt`/`readme.txt`
+  aus einem Linux-Backup → zwei Dateien (`readme (2).txt`).
+- Echte native Dialoge, Rechte-Prompts, Drag & Drop, Downloads, Toolbar-Icon,
+  Firefox-Laufzeit — wie Abschnitt 6.

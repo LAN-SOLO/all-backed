@@ -7,7 +7,11 @@ export type Theme = 'dark' | 'light';
 const THEME_KEY = 'theme';
 
 export function detectTheme(): Theme {
-  return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+  try {
+    return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark'; // storage blocked
+  }
 }
 
 export function applyTheme(theme: Theme): void {
@@ -17,6 +21,10 @@ export function applyTheme(theme: Theme): void {
 }
 
 export function saveTheme(theme: Theme): void {
-  localStorage.setItem(THEME_KEY, theme);
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    /* storage blocked — applies to this session only */
+  }
   applyTheme(theme);
 }

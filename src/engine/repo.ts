@@ -10,7 +10,7 @@ import {
   slugify,
 } from './types';
 import { decrypt, deriveKey, encrypt, gunzip, gzip, randomSaltB64 } from './crypto';
-import { fileExists, getDirByPath, readFile, readFileIfExists, writeFile } from './fsx';
+import { fileExists, getDirByPath, readFile, readFileIfExists, writeFileRetry } from './fsx';
 
 export interface OpenRepo {
   root: FileSystemDirectoryHandle;
@@ -34,7 +34,7 @@ export function parseRepoConfig(raw: ArrayBuffer): RepoConfig {
   try {
     config = JSON.parse(decoder.decode(raw)) as RepoConfig;
   } catch {
-    throw new EngineError('repo-invalid', 'ab-repo.json is not valid JSON.');
+    throw new EngineError('repo-invalid', 'ab-repo.json is not valid JSON.', REPO_CONFIG_FILE);
   }
   const kdf = config?.kdf;
   const valid =
@@ -54,7 +54,7 @@ export function parseRepoConfig(raw: ArrayBuffer): RepoConfig {
         /^[A-Za-z0-9+/]{16,}={0,2}$/.test(kdf.salt)
       : true);
   if (!valid) {
-    throw new EngineError('repo-invalid', 'ab-repo.json is damaged or has an unsupported format.');
+    throw new EngineError('repo-invalid', 'ab-repo.json is damaged or has an unsupported format.', REPO_CONFIG_FILE);
   }
   return config;
 }
@@ -78,7 +78,9 @@ async function verifyKey(repo: OpenRepo): Promise<void> {
   for await (const [, sub] of repo.blocks.entries()) {
     if (sub.kind !== 'directory') continue;
     for await (const [name, file] of sub.entries()) {
-      if (file.kind !== 'file') continue;
+      // only real blocks pin the key — never a stray swap/temp file (e.g. a
+      // leftover "<hash>.crswap" after a crash) or a .DS_Store
+      if (file.kind !== 'file' || !HASH_RE.test(name)) continue;
       await decryptOrThrow(repo.key, await readFile(sub, name));
       return;
     }
@@ -121,7 +123,7 @@ export async function openOrInitRepo(
         ? { name: 'PBKDF2', hash: 'SHA-256', iterations: PBKDF2_ITERATIONS, salt: randomSaltB64() }
         : null,
     };
-    await writeFile(root, REPO_CONFIG_FILE, JSON.stringify(config, null, 2));
+    await writeFileRetry(root, REPO_CONFIG_FILE, JSON.stringify(config, null, 2));
   }
   const key = await loadKey(config, passphrase);
   const repo: OpenRepo = {
@@ -142,7 +144,7 @@ export async function openRepo(
 ): Promise<OpenRepo> {
   const raw = await readFileIfExists(dir, REPO_CONFIG_FILE);
   if (!raw) {
-    throw new EngineError('not-a-repo', `"${dir.name}" is not an all backed repository.`);
+    throw new EngineError('not-a-repo', `"${dir.name}" is not an all backed repository.`, dir.name);
   }
   const config = parseRepoConfig(raw);
   const key = await loadKey(config, passphrase);
@@ -151,10 +153,10 @@ export async function openRepo(
   return {
     root: dir,
     blocks: await dir.getDirectoryHandle(BLOCKS_DIR, { create: false }).catch(() => {
-      throw new EngineError('repo-invalid', `"${dir.name}" has no blocks/ folder.`);
+      throw new EngineError('repo-invalid', `"${dir.name}" has no blocks/ folder.`, `${dir.name}/${BLOCKS_DIR}/`);
     }),
     manifests: await dir.getDirectoryHandle(MANIFESTS_DIR, { create: false }).catch(() => {
-      throw new EngineError('repo-invalid', `"${dir.name}" has no manifests/ folder.`);
+      throw new EngineError('repo-invalid', `"${dir.name}" has no manifests/ folder.`, `${dir.name}/${MANIFESTS_DIR}/`);
     }),
     config,
     key,
@@ -214,13 +216,13 @@ export async function readManifest(repo: OpenRepo, name: string): Promise<Manife
   } else if (repo.key) {
     // an encrypted repo never writes plaintext manifests — a planted one
     // must not be trusted
-    throw new EngineError('manifest-invalid', `Unencrypted manifest in an encrypted repository: ${name}`);
+    throw new EngineError('manifest-invalid', `Unencrypted manifest in an encrypted repository: ${name}`, name);
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(decoder.decode(raw));
   } catch {
-    throw new EngineError('manifest-invalid', `Manifest ${name} is not valid JSON.`);
+    throw new EngineError('manifest-invalid', `Manifest ${name} is not valid JSON.`, name);
   }
   return validateManifest(parsed, name);
 }
@@ -240,16 +242,17 @@ export function safeRelativePath(path: unknown): string[] | null {
 /** Structural validation of a decoded manifest (defends restore). */
 export function validateManifest(value: unknown, name = 'manifest'): Manifest {
   const m = value as Manifest;
-  const bad = (why: string) => new EngineError('manifest-invalid', `Manifest ${name}: ${why}`);
+  const bad = (why: string, path?: unknown) =>
+    new EngineError('manifest-invalid', `Manifest ${name}: ${why}`, typeof path === 'string' ? `${name}: ${path}` : name);
   if (!m || typeof m !== 'object' || m.format !== 1 || !Array.isArray(m.files)) {
     throw bad('unsupported format');
   }
   for (const file of m.files) {
     if (!file || typeof file !== 'object') throw bad('bad file entry');
-    if (!safeRelativePath(file.path)) throw bad(`unsafe path ${JSON.stringify(file.path)}`);
-    if (!Number.isFinite(file.size) || file.size < 0) throw bad(`bad size for ${file.path}`);
+    if (!safeRelativePath(file.path)) throw bad(`unsafe path ${JSON.stringify(file.path)}`, file.path);
+    if (!Number.isFinite(file.size) || file.size < 0) throw bad(`bad size for ${file.path}`, file.path);
     if (!Array.isArray(file.chunks) || !file.chunks.every((c) => typeof c === 'string' && HASH_RE.test(c))) {
-      throw bad(`bad chunk list for ${file.path}`);
+      throw bad(`bad chunk list for ${file.path}`, file.path);
     }
   }
   return m;
@@ -260,7 +263,7 @@ export async function writeManifest(repo: OpenRepo, manifest: Manifest): Promise
   const json = new TextEncoder().encode(JSON.stringify(manifest)).buffer as ArrayBuffer;
   const name = repo.key ? `manifest-${stamp}.json.enc` : `manifest-${stamp}.json`;
   const data = repo.key ? await encrypt(repo.key, json) : json;
-  await writeFile(repo.manifests, name, data);
+  await writeFileRetry(repo.manifests, name, data);
   return name;
 }
 

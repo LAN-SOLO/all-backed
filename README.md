@@ -28,7 +28,8 @@ Erweiterung laden" → `dist/`-Ordner wählen. Firefox: `about:debugging` →
 Engine-Selbsttest ohne Browser: `pnpm test` baut die Engine per Vite (SSR) und
 führt `src/engine/selftest.ts` gegen `scripts/memfs.mjs` aus — eine
 In-Memory-Nachbildung der File System Access API mit Chromium-Semantik
-(unzulässige Namen, atomares `close()`, `abort()`). Exit-Code 0 = PASS.
+(unzulässige Namen wie unter Windows, Groß-/Kleinschreibung und NFC/NFD
+gleichgesetzt wie bei APFS/NTFS, atomares `close()`, `abort()`). Exit-Code 0 = PASS.
 
 Engine-Selbsttest im Browser (Dev-Server, läuft komplett über OPFS):
 Konsole öffnen → `await window.abSelfTest()` — deckt auch die
@@ -77,6 +78,24 @@ Audit, Testmatrix und manuelle Checkliste für 1.0: `AUDIT-1.0.md`.
 - Block-Dateinamen = Klartext-SHA-256 (Fingerprint-Leak; später keyed hashes)
 - Kein Zeitplan (Pro)
 - Keine leeren Ordner, Dateirechte oder Änderungszeiten im Restore
-- Aufgaben-Ordnername wird beim ersten erfolgreichen Lauf festgeschrieben
-  (`repoSlug`); zwei Aufgaben mit gleichem Namen auf demselben Ziel teilen
-  sich ein Repository (bei gleicher Passphrase) bzw. werden abgewiesen
+- Aufgaben-Ordnername wird beim ersten Lauf festgeschrieben (`repoSlug`);
+  ist er schon von einer anderen Aufgabe belegt, wird nummeriert
+  (`<name>-2`) — zwei Aufgaben teilen sich nie ein Repository
+
+## Verhalten seit Audit-Runde 2
+
+- Backup und Restore lassen sich mit **[Abbrechen]** stoppen
+  (`AbortSignal` in `runBackup`/`runRestore`/`untarToDirectory`): kein Manifest,
+  keine halbe Datei; geschriebene Blöcke dedupen den nächsten Lauf.
+- Restore legt Zielnamen in der Engine fest (`src/engine/portable.ts`):
+  unter Windows/macOS unzulässige Namen (`a:b.txt`, `CON`, `x?`, Punkt/Leerzeichen
+  am Ende) → `_`, Kollisionen nach Groß-/Kleinschreibung bzw. NFC/NFD →
+  `name (2).ext`; alle Umbenennungen werden gelistet.
+- Nicht leerer Restore-Zielordner → Rückfrage mit Inhaltsvorschau; ein Ordner
+  innerhalb des Repositories wird als Ziel abgelehnt.
+- Block-/Manifest-Schreiben wiederholt bei kurzen Sperren
+  (`NoModificationAllowedError`/`InvalidStateError`, z. B. Virenscanner unter
+  Windows) bis zu dreimal.
+- Fehler werden sprachneutral gespeichert (`errorInfo`) und in der aktuellen
+  Sprache angezeigt; `.tar`-Fehler sind übersetzt.
+- Download-Namen tragen das lokale Datum (nicht UTC).

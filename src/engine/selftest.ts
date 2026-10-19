@@ -6,7 +6,12 @@
 import { runBackup } from './backup';
 import { runRestore } from './restore';
 import { findRepos, listManifests, openRepo } from './repo';
-import { walkFiles, readFile, writeFile, getDirByPath } from './fsx';
+import { walkFiles, readFile, writeFile, writeFileRetry, getDirByPath } from './fsx';
+import { openOrInitRepo } from './repo';
+import { inspectRestoreTarget } from './restore';
+import { planRestorePaths, portableSegment } from './portable';
+import { describeError, formatError } from '../errors';
+import { makeT, missingTranslations } from '../i18n';
 import { buildTar, tarDirectory, untarToDirectory } from './tar';
 import { gzip, sha256Hex } from './crypto';
 import { EngineError, pickRepoSlug } from './types';
@@ -407,6 +412,247 @@ async function regressionTests(opfs: FileSystemDirectoryHandle, t: (m: string) =
     throw new Error('R11: pickRepoSlug');
   }
   t('R11 repository folder of a new task never collides with a pinned one');
+
+
+  // R12: names other systems cannot hold are renamed BEFORE writing (the
+  // memfs target rejects them like Chromium on Windows) and listed; names
+  // that collide on case-insensitive volumes (APFS/NTFS) get a number
+  // instead of overwriting each other
+  const seg = (name: string, want: string) => {
+    if (portableSegment(name) !== want) throw new Error(`R12: portableSegment(${JSON.stringify(name)}) = ${JSON.stringify(portableSegment(name))}`);
+  };
+  seg('a:b.txt', 'a_b.txt');
+  seg('what?', 'what_');
+  seg('CON', '_CON');
+  seg('nul.txt', '_nul.txt');
+  seg('COM1.log', '_COM1.log');
+  seg('draft.', 'draft_');
+  seg('trailing ', 'trailing_');
+  seg('Bericht März.docx', 'Bericht März.docx');
+  seg('console.txt', 'console.txt');
+  seg('.git', '.git');
+  const plannedNames = planRestorePaths([
+    ['L', 'README.txt'],
+    ['L', 'readme.txt'],
+    ['L', 'x'],
+    ['L', 'X', 'inner.txt'],
+  ]).map((p) => p.parts.join('/'));
+  if (JSON.stringify(plannedNames) !== JSON.stringify(['L/README.txt', 'L/readme (2).txt', 'L/x', 'L/X (2)/inner.txt'])) {
+    throw new Error(`R12: planRestorePaths ${JSON.stringify(plannedNames)}`);
+  }
+  const portSrc = await fresh('port-src');
+  const contents = ['colon', 'reserved', 'dot', 'upper', 'lower', 'question', 'nfc', 'nfd', 'plain'];
+  for (const [i, text] of contents.entries()) await writeFile(portSrc, `f${i}.txt`, text);
+  const portDst = await fresh('port-dst');
+  await runBackup({ sources: [{ kind: 'handle', handle: portSrc }], dest: portDst, taskName: 'port' });
+  const portRepo = await openRepo((await findRepos(portDst))[0].handle);
+  const portManifest = JSON.parse(new TextDecoder().decode(await readFile(portRepo.manifests, (await listManifests(portRepo))[0])));
+  const exotic = [
+    'Mac/a:b.txt',
+    'Mac/CON.txt',
+    'Mac/draft.',
+    'Linux/README.txt',
+    'Linux/readme.txt',
+    'Mac/what?/x.txt',
+    'Mac/Grüße.txt',
+    'Mac/Grüße.txt',
+    'Mac/plain.txt',
+  ];
+  portManifest.files.sort((a: { path: string }, b: { path: string }) => a.path.localeCompare(b.path));
+  portManifest.files.forEach((f: { path: string }, i: number) => (f.path = exotic[i]));
+  await writeFile(portRepo.manifests, 'manifest-9999-names.json', JSON.stringify(portManifest));
+  const portOut = await fresh('port-out');
+  const portRun = await runRestore({ repo: portRepo, manifestName: 'manifest-9999-names.json', target: portOut });
+  const portTree = await treeText(portOut);
+  const wantTree: Record<string, string> = {
+    'Mac/a_b.txt': 'colon',
+    'Mac/_CON.txt': 'reserved',
+    'Mac/draft_': 'dot',
+    'Linux/README.txt': 'upper',
+    'Linux/readme (2).txt': 'lower',
+    'Mac/what_/x.txt': 'question',
+    'Mac/Grüße.txt': 'nfc',
+    'Mac/Grüße (2).txt': 'nfd',
+    'Mac/plain.txt': 'plain',
+  };
+  if (
+    portRun.failed.length !== 0 ||
+    portRun.fileCount !== 9 ||
+    portRun.renamed.length !== 6 ||
+    portTree.size !== 9 ||
+    Object.entries(wantTree).some(([path, text]) => portTree.get(path) !== text)
+  ) {
+    throw new Error(`R12: failed=${JSON.stringify(portRun.failed.map((f) => f.path))} renamed=${JSON.stringify(portRun.renamed)} tree=${JSON.stringify([...portTree])}`);
+  }
+  t('R12 non-portable and case-colliding names renamed before writing, nothing lost');
+
+  // R13: cancelling — a cancelled backup writes no version (the next run
+  // reuses its blocks), a cancelled restore leaves no partial file
+  const cancelSrc = await fresh('cancel-src');
+  for (let i = 0; i < 6; i++) await writeFile(cancelSrc, `c${i}.bin`, new Uint8Array(70 * 1024).fill(i + 1).buffer);
+  const cancelDst = await fresh('cancel-dst');
+  const backupAbort = new AbortController();
+  let cancelErr: unknown = null;
+  try {
+    await runBackup({
+      sources: [{ kind: 'handle', handle: cancelSrc }],
+      dest: cancelDst,
+      taskName: 'cancel',
+      chunkSize: 64 * 1024,
+      signal: backupAbort.signal,
+      onProgress: (p) => {
+        if (p.phase === 'backup' && p.filesDone >= 2) backupAbort.abort();
+      },
+    });
+  } catch (err) {
+    cancelErr = err;
+  }
+  const cancelRepoDir = await getDirByPath(cancelDst, ['allbacked', 'cancel'], false);
+  const cancelRepo = await openRepo(cancelRepoDir);
+  if (!(cancelErr instanceof DOMException && cancelErr.name === 'AbortError') || (await listManifests(cancelRepo)).length !== 0) {
+    throw new Error(`R13: cancelled backup: ${String(cancelErr)}, manifests=${(await listManifests(cancelRepo)).length}`);
+  }
+  const afterCancel = await runBackup({ sources: [{ kind: 'handle', handle: cancelSrc }], dest: cancelDst, taskName: 'cancel', chunkSize: 64 * 1024 });
+  if (afterCancel.fileCount !== 6 || afterCancel.dedupBlocks < 2) {
+    throw new Error(`R13: run after cancel files=${afterCancel.fileCount} dedup=${afterCancel.dedupBlocks}`);
+  }
+  const restoreAbort = new AbortController();
+  const cancelOut = await fresh('cancel-out');
+  cancelErr = null;
+  try {
+    await runRestore({
+      repo: cancelRepo,
+      manifestName: afterCancel.manifestName,
+      target: cancelOut,
+      signal: restoreAbort.signal,
+      // abort in the middle of the third file (its first block is written)
+      onProgress: (p) => {
+        if (p.filesDone === 2 && p.bytesDone > 2 * 70 * 1024) restoreAbort.abort();
+      },
+    });
+  } catch (err) {
+    cancelErr = err;
+  }
+  const cancelTree = await treeText(cancelOut);
+  if (!(cancelErr instanceof DOMException && cancelErr.name === 'AbortError') || cancelTree.size !== 2) {
+    throw new Error(`R13: cancelled restore: ${String(cancelErr)}, files=${JSON.stringify([...cancelTree.keys()])}`);
+  }
+  for (const [path, text] of cancelTree) {
+    if (text.length !== 70 * 1024) throw new Error(`R13: partial file after cancel: ${path}`);
+  }
+  t('R13 cancelled backup writes no version, cancelled restore leaves no partial file');
+
+  // R14: a short lock on the destination (Windows virus scanner, OneDrive)
+  // is retried; a real error (quota) is not
+  const retryDir = await fresh('retry');
+  let failuresLeft = 2;
+  let attempts = 0;
+  const flaky = {
+    getFileHandle: async (name: string, opts?: FileSystemGetFileOptions) => {
+      const real = await retryDir.getFileHandle(name, opts);
+      return {
+        createWritable: async () => {
+          const w = await real.createWritable();
+          attempts++;
+          return {
+            write: (d: FileSystemWriteChunkType) => w.write(d),
+            abort: () => w.abort(),
+            close: async () => {
+              if (failuresLeft-- > 0) {
+                await w.abort();
+                throw new DOMException('locked', 'NoModificationAllowedError');
+              }
+              return w.close();
+            },
+          };
+        },
+      };
+    },
+  } as unknown as FileSystemDirectoryHandle;
+  await writeFileRetry(flaky, 'block', 'payload', [1, 1, 1]);
+  if (attempts !== 3 || (await treeText(retryDir)).get('block') !== 'payload') {
+    throw new Error(`R14: retry attempts=${attempts}`);
+  }
+  let quotaAttempts = 0;
+  const full = {
+    getFileHandle: async () => ({
+      createWritable: async () => {
+        quotaAttempts++;
+        return { write: async () => { throw new DOMException('full', 'QuotaExceededError'); }, abort: async () => {}, close: async () => {} };
+      },
+    }),
+  } as unknown as FileSystemDirectoryHandle;
+  let quotaThrown = false;
+  try {
+    await writeFileRetry(full, 'x', 'y', [1, 1, 1]);
+  } catch (err) {
+    quotaThrown = err instanceof DOMException && err.name === 'QuotaExceededError';
+  }
+  if (!quotaThrown || quotaAttempts !== 1) throw new Error(`R14: quota attempts=${quotaAttempts}`);
+  t('R14 transient destination locks retried, quota errors fail at once');
+
+  // R15: a stray non-block file in blocks/ (leftover .crswap after a crash,
+  // .DS_Store) must not be taken as proof of a wrong passphrase
+  const strayDst = await fresh('stray-dst');
+  const strayRepo = await openOrInitRepo(strayDst, 'stray', PASS);
+  const strayBlocks = await strayRepo.blocks.getDirectoryHandle('00', { create: true });
+  await writeFile(strayBlocks, '00aa.crswap', 'not a block');
+  const strayRun = await runBackup({ sources: [{ kind: 'handle', handle: portSrc }], dest: strayDst, taskName: 'stray', passphrase: PASS });
+  if (!strayRun.verifiedOk) throw new Error('R15: stray file broke the run');
+  t('R15 stray files in blocks/ do not fake a wrong passphrase');
+
+  // R16: restore target check — inside the repository is refused by the UI,
+  // a non-empty target asks first (OS litter like .DS_Store does not count)
+  const portRepoDir = (await findRepos(portDst))[0].handle;
+  const inRepo = await inspectRestoreTarget(await portRepoDir.getDirectoryHandle('manifests'), portRepoDir);
+  const sameRepo = await inspectRestoreTarget(portRepoDir, portRepoDir);
+  const litter = await fresh('litter');
+  await writeFile(litter, '.DS_Store', 'x');
+  await writeFile(litter, 'desktop.ini', 'x');
+  const litterCheck = await inspectRestoreTarget(litter, portRepoDir);
+  const busyCheck = await inspectRestoreTarget(portOut, portRepoDir);
+  if (!inRepo.insideRepo || !sameRepo.insideRepo || litterCheck.insideRepo || litterCheck.existing.length !== 0 || busyCheck.existing.length !== 2) {
+    throw new Error(`R16: ${JSON.stringify({ inRepo, sameRepo, litterCheck, busyCheck })}`);
+  }
+  t('R16 restore target inside the repository detected, non-empty target reported');
+
+  // R17: every error the UI can show is translated — engine codes, tar
+  // errors, cancel — and both languages have every string
+  const en = makeT('en');
+  const de = makeT('de');
+  const tarCode = async (blob: Blob) => {
+    try {
+      await untarToDirectory(blob, await fresh('tar-code'));
+    } catch (err) {
+      return err instanceof EngineError ? err.code : String(err);
+    }
+    return 'accepted';
+  };
+  if ((await tarCode(new Blob([new Uint8Array(1024).fill(65)]))) !== 'archive-invalid' || (await tarCode(slip.slice(0, 600))) !== 'archive-truncated') {
+    throw new Error('R17: tar errors are not EngineErrors');
+  }
+  const samples: unknown[] = [
+    new EngineError('archive-invalid', 'x'),
+    new EngineError('archive-truncated', 'x'),
+    new EngineError('block-corrupt', 'Block abc is damaged.', 'abc…'),
+    new DOMException('x', 'AbortError'),
+    new DOMException('x', 'TypeMismatchError'),
+    new DOMException('x', 'InvalidStateError'),
+    new TypeError('Name is not allowed.'),
+  ];
+  for (const sample of samples) {
+    const info = describeError(sample);
+    if (info.keys[0] === 'errGeneric' || formatError(info, en) === formatError(info, de)) {
+      throw new Error(`R17: untranslated ${String(sample)} → ${formatError(info, en)}`);
+    }
+  }
+  if (formatError(describeError(new EngineError('block-corrupt', 'Block abc is damaged.', 'abc…')), de).includes('damaged')) {
+    throw new Error('R17: English engine sentence leaked into the German message');
+  }
+  if (formatError({ keys: ['noSuchKey' as never] }, de) !== de('errGeneric')) throw new Error('R17: unknown stored key');
+  const missing = missingTranslations();
+  if (missing.length > 0) throw new Error(`R17: missing translations ${missing.join(', ')}`);
+  t('R17 engine/tar/cancel errors translated, EN/DE string sets complete');
 
   await opfs.removeEntry('ab-reg', { recursive: true }).catch(() => {});
 }
