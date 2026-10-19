@@ -4,8 +4,9 @@
 //   - names '', '.', '..' and names containing '/' or '\' are rejected
 //     (TypeError), so path traversal attempts fail exactly like in Chrome;
 //     so are names Windows cannot hold (':' '*' '?' '"' '<' '>' '|', control
-//     characters, trailing dot/space, CON/NUL/COM1…) — Chromium's name check
-//     on Windows, the strictest target a restore can meet
+//     and format characters, white space/'.'/'~' at either end, CON/NUL/COM1…
+//     with any extension, desktop.ini, .lnk/.url/.scf) — Chromium's name
+//     check for real folders, the strictest target a restore can meet
 //   - lookups are case- and normalization-insensitive (like APFS and NTFS):
 //     "README.txt" finds "readme.txt", the first spelling is kept
 //   - createWritable() writes to a swap buffer; close() commits atomically,
@@ -19,17 +20,27 @@ function domError(name, message) {
   return new DOMException(message, name);
 }
 
-const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.[^.]*)?$/i;
+// Chromium's name check for real folders (measured against a local folder
+// handle, see src/engine/portable.ts) plus Windows' device names.
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3]|conin\$|conout\$|clock\$)(\..*)?$/i;
+const SHELL_MAGIC = /^(desktop\.ini|thumbs\.db)$/i;
+const SHELL_EXT = /\.(lnk|url|scf|\{.*\})$/i;
+const ILLEGAL_ANYWHERE = /[/\\<>:"|?*\p{Cc}\p{Cf}\p{Noncharacter_Code_Point}]/u;
+const ILLEGAL_AT_ENDS = /^[\p{White_Space}.~]|[\p{White_Space}.~]$/u;
 
 function checkName(name) {
+  // like Chromium: one leading '.' (hidden file) is stripped before the check
+  const core = typeof name === 'string' && name.startsWith('.') ? name.slice(1) : name;
   if (
     typeof name !== 'string' ||
     name === '' ||
     name === '.' ||
     name === '..' ||
-    /[/\\<>:"|?*\u0000-\u001f]/.test(name) ||
-    /[. ]$/.test(name) ||
-    WINDOWS_RESERVED.test(name)
+    ILLEGAL_ANYWHERE.test(name) ||
+    ILLEGAL_AT_ENDS.test(core) ||
+    WINDOWS_RESERVED.test(name) ||
+    SHELL_MAGIC.test(name) ||
+    SHELL_EXT.test(name)
   ) {
     throw new TypeError(`Name is not allowed: ${JSON.stringify(name)}`);
   }

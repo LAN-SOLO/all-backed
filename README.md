@@ -88,8 +88,11 @@ Audit, Testmatrix und manuelle Checkliste für 1.0: `AUDIT-1.0.md`.
   (`AbortSignal` in `runBackup`/`runRestore`/`untarToDirectory`): kein Manifest,
   keine halbe Datei; geschriebene Blöcke dedupen den nächsten Lauf.
 - Restore legt Zielnamen in der Engine fest (`src/engine/portable.ts`):
-  unter Windows/macOS unzulässige Namen (`a:b.txt`, `CON`, `x?`, Punkt/Leerzeichen
-  am Ende) → `_`, Kollisionen nach Groß-/Kleinschreibung bzw. NFC/NFD →
+  unter Windows/macOS unzulässige Namen (`a:b.txt`, `CON`, `CON.tar.gz`, `x?`,
+  Punkt/Leerzeichen/`~` an den Enden, Cc/Cf-Zeichen wie U+200D in Emoji-Folgen)
+  → `_`; `.lnk`/`.url`/`.scf`/`.{CLSID}` → `…_`, `desktop.ini`/`Thumbs.db` →
+  `_…` (Chromium lehnt diese in echten Ordnern ab — in OPFS nicht, daher bildet
+  `scripts/memfs.mjs` die gemessenen Regeln nach); Kollisionen nach Groß-/Kleinschreibung bzw. NFC/NFD →
   `name (2).ext`; alle Umbenennungen werden gelistet.
 - Nicht leerer Restore-Zielordner → Rückfrage mit Inhaltsvorschau; ein Ordner
   innerhalb des Repositories wird als Ziel abgelehnt.

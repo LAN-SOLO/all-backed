@@ -14,7 +14,7 @@ import { describeError, formatError } from '../errors';
 import { makeT, missingTranslations } from '../i18n';
 import { buildTar, tarDirectory, untarToDirectory } from './tar';
 import { gzip, sha256Hex } from './crypto';
-import { EngineError, pickRepoSlug } from './types';
+import { EngineError, pickRepoSlug, slugify } from './types';
 
 type Log = (line: string) => void;
 
@@ -431,6 +431,31 @@ async function regressionTests(opfs: FileSystemDirectoryHandle, t: (m: string) =
   seg('Bericht März.docx', 'Bericht März.docx');
   seg('console.txt', 'console.txt');
   seg('.git', '.git');
+  // Chromium's checks for real folders (measured against a local folder):
+  // format characters, white space/'.'/'~' at the ends, device names with
+  // any extension, shell files and extensions
+  seg('fam\u{1F468}\u200D\u{1F469}.jpg', 'fam\u{1F468}_\u{1F469}.jpg');
+  seg('soft\u00ADhyphen', 'soft_hyphen');
+  seg('\uFEFFbom.txt', '_bom.txt');
+  seg(' lead.txt', '_lead.txt');
+  seg('nbsp\u00A0', 'nbsp_');
+  seg('~$Bericht.docx', '_$Bericht.docx');
+  seg('notes.txt~', 'notes.txt_');
+  seg('a~b.txt', 'a~b.txt');
+  seg('..x', '._x');
+  seg('CON.tar.gz', '_CON.tar.gz');
+  seg('clock$', '_clock$');
+  seg('desktop.ini', '_desktop.ini');
+  seg('Thumbs.db', '_Thumbs.db');
+  seg('Kunde.lnk', 'Kunde.lnk_');
+  seg('Portal.URL', 'Portal.URL_');
+  seg('x.{0AFACED1-E828-11D1-9187-B532F1E9575D}', 'x.{0AFACED1-E828-11D1-9187-B532F1E9575D}_');
+  seg('x.lnk.txt', 'x.lnk.txt');
+  seg('heart\u2764\uFE0F.txt', 'heart\u2764\uFE0F.txt');
+  // the repository folder of a task called "Aux" must not be a device name
+  if (slugify('Aux') !== 'aux-task' || slugify('COM1') !== 'com1-task' || slugify('Auxiliar') !== 'auxiliar') {
+    throw new Error(`R12: slugify device names ${slugify('Aux')} ${slugify('COM1')}`);
+  }
   const plannedNames = planRestorePaths([
     ['L', 'README.txt'],
     ['L', 'readme.txt'],
@@ -441,8 +466,8 @@ async function regressionTests(opfs: FileSystemDirectoryHandle, t: (m: string) =
     throw new Error(`R12: planRestorePaths ${JSON.stringify(plannedNames)}`);
   }
   const portSrc = await fresh('port-src');
-  const contents = ['colon', 'reserved', 'dot', 'upper', 'lower', 'question', 'nfc', 'nfd', 'plain'];
-  for (const [i, text] of contents.entries()) await writeFile(portSrc, `f${i}.txt`, text);
+  const contents = ['colon', 'reserved', 'dot', 'upper', 'lower', 'question', 'nfc', 'nfd', 'plain', 'zwj', 'lnk', 'tilde', 'ini'];
+  for (const [i, text] of contents.entries()) await writeFile(portSrc, `f${String(i).padStart(2, '0')}.txt`, text);
   const portDst = await fresh('port-dst');
   await runBackup({ sources: [{ kind: 'handle', handle: portSrc }], dest: portDst, taskName: 'port' });
   const portRepo = await openRepo((await findRepos(portDst))[0].handle);
@@ -457,6 +482,10 @@ async function regressionTests(opfs: FileSystemDirectoryHandle, t: (m: string) =
     'Mac/Grüße.txt',
     'Mac/Grüße.txt',
     'Mac/plain.txt',
+    'Mac/fam\u{1F468}\u200D\u{1F469}.jpg',
+    'Win/Kunde.lnk',
+    'Win/~$Angebot.docx',
+    'Win/desktop.ini',
   ];
   portManifest.files.sort((a: { path: string }, b: { path: string }) => a.path.localeCompare(b.path));
   portManifest.files.forEach((f: { path: string }, i: number) => (f.path = exotic[i]));
@@ -474,12 +503,16 @@ async function regressionTests(opfs: FileSystemDirectoryHandle, t: (m: string) =
     'Mac/Grüße.txt': 'nfc',
     'Mac/Grüße (2).txt': 'nfd',
     'Mac/plain.txt': 'plain',
+    'Mac/fam\u{1F468}_\u{1F469}.jpg': 'zwj',
+    'Win/Kunde.lnk_': 'lnk',
+    'Win/_$Angebot.docx': 'tilde',
+    'Win/_desktop.ini': 'ini',
   };
   if (
     portRun.failed.length !== 0 ||
-    portRun.fileCount !== 9 ||
-    portRun.renamed.length !== 6 ||
-    portTree.size !== 9 ||
+    portRun.fileCount !== 13 ||
+    portRun.renamed.length !== 10 ||
+    portTree.size !== 13 ||
     Object.entries(wantTree).some(([path, text]) => portTree.get(path) !== text)
   ) {
     throw new Error(`R12: failed=${JSON.stringify(portRun.failed.map((f) => f.path))} renamed=${JSON.stringify(portRun.renamed)} tree=${JSON.stringify([...portTree])}`);
@@ -608,10 +641,12 @@ async function regressionTests(opfs: FileSystemDirectoryHandle, t: (m: string) =
   const sameRepo = await inspectRestoreTarget(portRepoDir, portRepoDir);
   const litter = await fresh('litter');
   await writeFile(litter, '.DS_Store', 'x');
-  await writeFile(litter, 'desktop.ini', 'x');
+  // (desktop.ini/Thumbs.db count as litter too, but Chromium refuses to
+  // create them, so only Windows itself puts them there)
+  await writeFile(litter, '.localized', 'x');
   const litterCheck = await inspectRestoreTarget(litter, portRepoDir);
   const busyCheck = await inspectRestoreTarget(portOut, portRepoDir);
-  if (!inRepo.insideRepo || !sameRepo.insideRepo || litterCheck.insideRepo || litterCheck.existing.length !== 0 || busyCheck.existing.length !== 2) {
+  if (!inRepo.insideRepo || !sameRepo.insideRepo || litterCheck.insideRepo || litterCheck.existing.length !== 0 || busyCheck.existing.length !== 3) {
     throw new Error(`R16: ${JSON.stringify({ inRepo, sameRepo, litterCheck, busyCheck })}`);
   }
   t('R16 restore target inside the repository detected, non-empty target reported');

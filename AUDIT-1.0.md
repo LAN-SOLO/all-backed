@@ -290,3 +290,64 @@ Zeitstempel in Ortszeit, fn-Taste am Mac. README ergänzt.
   aus einem Linux-Backup → zwei Dateien (`readme (2).txt`).
 - Echte native Dialoge, Rechte-Prompts, Drag & Drop, Downloads, Toolbar-Icon,
   Firefox-Laufzeit — wie Abschnitt 6.
+
+## 9. Runde 2 – Verifikation (unabhängige Zweitprüfung, 2026-10-20)
+
+Prüfung von `39a79bc..ec885bd` mit dem Ziel, die Angaben aus Abschnitt 8 zu
+widerlegen.
+
+### 9.1 Was tatsächlich ausgeführt wurde
+
+- `pnpm test` (Node, memfs), `pnpm typecheck`, `pnpm build`, `pnpm build:firefox`,
+  `pnpm audit --prod` (keine Befunde) — alle grün nach den Fixes unten.
+- `await window.abSelfTest()` in echtem Chromium (chrome-headless-shell 1217,
+  CDP, echtes OPFS) — PASS inkl. erweitertem R12.
+- UI-Abläufe aus Runde 2 erneut gefahren (Direktmodus DE: Backup, Abbruch,
+  falsche Passphrase, Sprachwechsel, Restore mit Ziel im Repo / nicht leerem
+  Ziel / Überschreiben; Archivmodus: Ortszeit-Dateiname, kaputtes und
+  abgeschnittenes `.tar`, Import + Restore mit Umbenennungsliste — jetzt auch
+  mit `Kunde.lnk` und Emoji-ZWJ-Namen).
+- **Neu: Chromiums Namensprüfung an einem echten lokalen Ordner gemessen.**
+  Ein echter macOS-Ordner wurde per `Input.dispatchDragEvent` (CDP) als
+  `FileSystemDirectoryHandle` in die Seite gezogen. Schreibrecht gibt es
+  headless nicht, aber die Namensprüfung läuft vor der Rechteprüfung:
+  unzulässige Namen liefern `TypeError: Name is not allowed.`, zulässige
+  `NotAllowedError` (fehlendes Recht). So wurden ~70 Namen gegen den echten
+  Prüfpfad getestet. **OPFS nimmt dagegen alles an** (`a:b.txt`, `CON`, `end.`
+  …) — die Aussage aus Runde 2, R12 scheitere in echtem Chromium ohne Fix,
+  traf nur auf die memfs-Variante zu.
+
+### 9.2 Widerlegt / neu gefundene und behobene Fehler
+
+| # | Befund | Fix |
+| --- | --- | --- |
+| V2-1 (L5, hoch) | `portableSegment` deckte nur Windows-Sonderzeichen, Punkt/Leerzeichen am Ende und Gerätenamen mit *einer* Endung ab. Chromium lehnt in echten Ordnern (auf jedem System, gleicher Code) zusätzlich ab: Cc/Cf-Zeichen (U+200D in Emoji-Folgen wie 👨‍👩‍👧, weiches Trennzeichen, BOM, Bidi-Marken), Nicht-Zeichen, Leerraum (auch U+00A0/U+3000), `.` und `~` am **Anfang** und Ende (`~$Angebot.docx`, `notiz.txt~`, ` x.txt`, `..x`), `CON.tar.gz`, `clock$`, `desktop.ini`, `Thumbs.db`, Endungen `.lnk`/`.url`/`.scf`/`.{CLSID}`. Gemessen: von 59 Problemnamen blieben mit dem alten Code **37 abgelehnt** (Datei wäre beim Restore nur als Fehler gelistet), mit dem neuen **0**. | `src/engine/portable.ts` bildet die gemessenen Regeln nach (`_` statt Zeichen, `Kunde.lnk_`, `_desktop.ini`); `scripts/memfs.mjs` lehnt dieselben Namen ab; R12 um 19 Segment-Fälle und 4 End-zu-End-Dateien erweitert (Negativkontrolle mit altem `portable.ts`: R12 FAIL). |
+| V2-2 (L5) | Eine Aufgabe namens „Aux“, „NUL“, „COM1“ … bekam den Repository-Ordner `allbacked/aux` — Chromium verweigert diesen Ordnernamen in echten Ordnern, jedes Backup im Direktmodus wäre mit „Name nicht erlaubt“ gescheitert. | `slugify` hängt bei Gerätenamen `-task` an (`aux-task`); bereits festgelegte `repoSlug`s bleiben unverändert. Test in R12. |
+| V2-3 (L12) | Hinweis „Originalname unter Windows/macOS unzulässig“ passte nicht zu `.lnk`/`desktop.ini` (die verbietet der Browser). | Text DE/EN ergänzt („oder im Browser“); Hilfe DE/EN und README nennen die neuen Fälle. |
+
+### 9.3 Bestätigt (nicht widerlegt)
+
+W2 (Ziel im Repo abgelehnt, Rückfrage bei nicht leerem Ziel, Abbrechen
+schreibt nichts), W3 (Abbruch Backup/Restore/Import; `AbortError` ist in
+`runRestore` fatal und landet nicht in der Fehlerliste), W4 (Retry nur für
+`NoModificationAllowedError`/`InvalidStateError`, jeder Versuch atomar), W5,
+W6, W7 (Sprachwechsel übersetzt „Letzter Lauf“), W8 (Ortsdatum im
+Dateinamen), W9 (kein Überlauf bei 760 px im Lauf), W10, W11 (alle
+`localStorage`-Zugriffe gekapselt, auch Hilfe/Theme), W12, W13. Kein
+`confirm`/`alert`/`prompt`, keine Netzzugriffe, kein `innerHTML`. Neue
+APIs (`AbortSignal.throwIfAborted`, `resolve`, `\p{…}`-Regex) laufen ab
+Chrome 102 / Firefox 115 (Manifest-Minima).
+
+### 9.4 Weiterhin offen / nur auf echter Hardware prüfbar
+
+- Schreiben in echte Ordner mit Recht (headless nicht erteilbar): dass die
+  umbenannten Namen nicht nur Chromiums Prüfung, sondern auch NTFS/APFS selbst
+  passieren — auf Windows u. a. Pfade > 260 Zeichen, Laufwerkswurzel als Ziel,
+  Sperren durch Virenscanner/OneDrive (welcher `DOMException`-Name).
+- Restore in einen *übergeordneten* Ordner des Repositories (z. B. das
+  Backup-Ziel selbst) wird nur über die Rückfrage „Ziel nicht leer“ abgefangen,
+  nicht abgelehnt; heißt ein gesicherter Quellordner zufällig `allbacked`,
+  landen Dateien neben den Repositories.
+- Restore-Ziel-Schreibfehler (gesperrte Zieldatei) werden pro Datei gelistet,
+  aber nicht wiederholt (nur Backup-Ziel hat Retry).
+- Übrige Punkte aus 8.4 und Abschnitt 6 unverändert.

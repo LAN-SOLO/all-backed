@@ -8,19 +8,39 @@
 // The engine therefore decides the target names itself before anything is
 // written — not the UI — and reports every file it had to rename.
 
-// Characters Windows (and Chromium's name check) refuse in a name; '/' never
-// occurs inside a manifest path segment.
-const FORBIDDEN = /[<>:"|?*\\\u0000-\u001f]/g;
-// Reserved device names, also with an extension ("NUL.txt") — Windows maps
-// them to devices instead of files.
-const RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)(\.[^.]*)?$/i;
+// The rules below mirror what Chromium's File System Access API accepts in a
+// real (non-OPFS) folder — measured 2026-10-20 against a local folder handle
+// in Chromium (headless shell 1217) — plus Windows' own limits. OPFS accepts
+// everything, so only a real folder shows them.
+
+// Never allowed anywhere: Windows' forbidden characters, control (Cc) and
+// format (Cf) characters — U+200D in emoji sequences like 👨‍👩‍👧, soft hyphen,
+// BOM, bidi marks — and Unicode non-characters. '/' never occurs inside a
+// manifest path segment.
+const FORBIDDEN = /[<>:"|?*\\\p{Cc}\p{Cf}\p{Noncharacter_Code_Point}]/gu;
+// Not allowed as first or last character: any white space (also U+00A0,
+// U+3000), '.' and '~'. Windows drops trailing dots and spaces ("draft."
+// would become "draft"); a single leading '.' (".git") is fine everywhere.
+const BAD_END = /[\p{White_Space}.~]/u;
+// Reserved device names, also with any extension ("NUL.txt", "CON.tar.gz") —
+// Windows maps them to devices instead of files; Chromium refuses them (and
+// desktop.ini / thumbs.db) on every system.
+const RESERVED = /^(con|prn|aux|nul|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3]|conin\$|conout\$|clock\$)(\..*)?$/i;
+const SHELL_MAGIC = /^(desktop\.ini|thumbs\.db)$/i;
+// Extensions Chromium refuses because Windows executes them (shortcuts,
+// shell commands, CLSID handlers): ".lnk", ".url", ".scf", ".{…}".
+const SHELL_EXT = /\.(lnk|url|scf|\{.*\})$/i;
 
 /** One path segment, rewritten so Windows, macOS and Linux all accept it. */
 export function portableSegment(name: string): string {
-  let out = name.replace(FORBIDDEN, '_');
-  // Windows drops trailing dots and spaces ("draft." would become "draft")
-  out = out.replace(/[. ]+$/, (tail) => '_'.repeat(tail.length));
-  if (RESERVED.test(out)) out = `_${out}`;
+  const chars = Array.from(name.replace(FORBIDDEN, '_'));
+  // a single leading '.' marks a hidden file and stays
+  const first = chars[0] === '.' && chars.length > 1 ? 1 : 0;
+  for (let i = first; i < chars.length && BAD_END.test(chars[i]); i++) chars[i] = '_';
+  for (let i = chars.length - 1; i >= first && BAD_END.test(chars[i]); i--) chars[i] = '_';
+  let out = chars.join('');
+  if (SHELL_EXT.test(out)) out = `${out}_`;
+  if (RESERVED.test(out) || SHELL_MAGIC.test(out)) out = `_${out}`;
   return out || '_';
 }
 

@@ -146,13 +146,15 @@ export class EngineError extends Error {
 }
 
 export function slugify(name: string): string {
-  return (
+  const slug =
     name
       .toLowerCase()
       .replace(/[äöüß]/g, (c) => ({ ä: 'ae', ö: 'oe', ü: 'ue', ß: 'ss' })[c] ?? c)
       .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'task'
-  );
+      .replace(/^-+|-+$/g, '') || 'task';
+  // a task called "Aux" or "COM1" would get a Windows device name as its
+  // repository folder — Chromium refuses to create that on every system
+  return /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/.test(slug) ? `${slug}-task` : slug;
 }
 
 /**

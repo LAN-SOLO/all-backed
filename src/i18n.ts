@@ -139,7 +139,7 @@ const STRINGS = {
     cancelledNote:
       'No new version was written; earlier versions are unchanged. Blocks already written are reused by the next run.',
     restoreCancelled: 'Restore cancelled — files restored up to this point remain in the target folder.',
-    renamedFiles: 'files restored under a different name (the original name is not allowed on Windows/macOS or would collide):',
+    renamedFiles: 'files restored under a different name (the original name is not allowed on Windows/macOS or by the browser, or would collide):',
     targetNotEmpty: 'The target folder is not empty:',
     targetNotEmptyHint: 'Files with the same name will be overwritten. An empty folder is the safest choice.',
     overwriteRestore: 'Overwrite & restore',
@@ -280,7 +280,7 @@ const STRINGS = {
     cancelledNote:
       'Es wurde keine neue Version geschrieben; frühere Versionen sind unverändert. Bereits geschriebene Blöcke nutzt der nächste Lauf wieder.',
     restoreCancelled: 'Wiederherstellung abgebrochen — bis dahin wiederhergestellte Dateien bleiben im Zielordner.',
-    renamedFiles: 'Dateien unter anderem Namen wiederhergestellt (der Originalname ist unter Windows/macOS unzulässig oder würde kollidieren):',
+    renamedFiles: 'Dateien unter anderem Namen wiederhergestellt (der Originalname ist unter Windows/macOS oder im Browser unzulässig oder würde kollidieren):',
     targetNotEmpty: 'Der Zielordner ist nicht leer:',
     targetNotEmptyHint: 'Gleichnamige Dateien werden überschrieben. Am sichersten ist ein leerer Ordner.',
     overwriteRestore: 'Überschreiben & wiederherstellen',
