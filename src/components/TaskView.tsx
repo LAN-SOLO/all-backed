@@ -1,10 +1,11 @@
 import { ReactNode, useEffect, useRef, useState } from 'react';
-import { BackupTask, Progress, REPO_DIR, RunSummary, slugify } from '../engine/types';
+import { BackupTask, Progress, REPO_DIR, RunSummary } from '../engine/types';
+import { claimRepoSlug } from '../engine/store';
 import { SourceDir, runBackup } from '../engine/backup';
 import { ensurePermission, getDirByPath, walkFiles } from '../engine/fsx';
 import { downloadBlob, opfsRepoContainer, supportsFsAccess } from '../engine/caps';
 import { tarDirectory } from '../engine/tar';
-import { Lang, makeT } from '../i18n';
+import { Lang, StringKey, makeT } from '../i18n';
 import { errorMessage } from '../errors';
 
 interface Props {
@@ -12,6 +13,8 @@ interface Props {
   lang: Lang;
   onChange: (task: BackupTask) => Promise<void>;
   onDelete: () => void;
+  /** Reports a running backup so the app can lock navigation meanwhile. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 interface FallbackSource {
@@ -135,7 +138,28 @@ function Card({
   );
 }
 
-export default function TaskView({ task, lang, onChange, onDelete }: Props) {
+function SkippedList({ summary, t }: { summary: RunSummary; t: (key: StringKey) => string }) {
+  if (!summary.skippedCount) return null;
+  const reason = (r: string, path: string) =>
+    path.endsWith('/') ? t('skippedFolder') : r === 'NotFoundError' ? t('skippedGone') : t('skippedLocked');
+  return (
+    <div className="mt-2 text-amber-300 light:text-amber-800" role="status">
+      <div>
+        {summary.skippedCount} {t('skippedFiles')}
+      </div>
+      <ul className="mt-1 max-h-32 space-y-0.5 overflow-y-auto text-xs">
+        {(summary.skipped ?? []).map((entry, i) => (
+          <li key={i} className="break-all">
+            <span className="text-slate-500 light:text-slate-600">└─</span> {entry.path} — {reason(entry.reason, entry.path)}
+          </li>
+        ))}
+        {(summary.skipped?.length ?? 0) < summary.skippedCount && <li>…</li>}
+      </ul>
+    </div>
+  );
+}
+
+export default function TaskView({ task, lang, onChange, onDelete, onBusyChange }: Props) {
   const t = makeT(lang);
   const [passphrase, setPassphrase] = useState('');
   const [fallbackSources, setFallbackSources] = useState<FallbackSource[]>([]);
@@ -339,11 +363,15 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
       }
     }
     setRunning(true);
+    onBusyChange?.(true);
     setProgress(null);
     const started = performance.now();
-    // pinned after the first successful run, so renaming keeps the repository
-    const repoSlug = task.repoSlug ?? slugify(task.name);
+    // pinned on the first run, so renaming keeps the repository; a slug
+    // another task already uses gets a number instead of sharing its folder
+    let repoSlug = task.repoSlug ?? '';
     try {
+      repoSlug = await claimRepoSlug(task);
+      if (repoSlug !== task.repoSlug) await onChange({ ...task, repoSlug });
       let dest: FileSystemDirectoryHandle;
       if (supportsFsAccess) {
         for (const source of task.sources) await ensurePermission(source, 'read');
@@ -392,8 +420,9 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
         encrypted: task.encrypt,
         error: message,
       };
-      await onChange({ ...task, lastRun: failedRun }).catch(() => {});
+      await onChange({ ...task, ...(repoSlug ? { repoSlug } : {}), lastRun: failedRun }).catch(() => {});
     } finally {
+      onBusyChange?.(false);
       setRunning(false);
       setProgress(null);
     }
@@ -534,6 +563,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
                 {banner.note && <div className="text-emerald-300 light:text-emerald-700">{banner.note}</div>}
               </dl>
             )}
+            {banner.ok && banner.summary && <SkippedList summary={banner.summary} t={t} />}
             {!banner.ok && <p className="text-red-300 light:text-red-700">{banner.message}</p>}
           </div>
           <button onClick={() => setBanner(null)} className="btn-ghost shrink-0 px-4 py-1">
@@ -716,6 +746,7 @@ export default function TaskView({ task, lang, onChange, onDelete }: Props) {
             </span>
             {' · '}
             {formatDuration(task.lastRun.durationMs)}
+            <SkippedList summary={task.lastRun} t={t} />
           </div>
           )}
         </div>

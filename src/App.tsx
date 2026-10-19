@@ -38,7 +38,21 @@ export default function App() {
   const [selection, setSelection] = useState<Selection>({ kind: 'none' });
   const [helpOpen, setHelpOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(detectTheme);
+  // a running backup/restore lives in the mounted view: switching away would
+  // unmount it mid-run (the task could then be started twice or deleted
+  // while it still writes), so navigation is locked until it finishes
+  const [busy, setBusy] = useState(false);
   const t = makeT(lang);
+
+  useEffect(() => {
+    if (!busy) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [busy]);
 
   useEffect(() => {
     loadTasks().then((loaded) => {
@@ -84,6 +98,10 @@ export default function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (helpOpen) return;
+      if (busy && (event.key === 'F2' || event.key === 'F6')) {
+        event.preventDefault();
+        return;
+      }
       const actions: Record<string, () => void> = {
         F1: () => window.dispatchEvent(new CustomEvent('ab:help')),
         F2: () => void addTask(),
@@ -99,7 +117,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [addTask, helpOpen]);
+  }, [addTask, helpOpen, busy]);
 
   const selectedTask =
     selection.kind === 'task' ? tasks.find((task) => task.id === selection.id) ?? null : null;
@@ -119,11 +137,11 @@ export default function App() {
       : t('neverRun');
   };
 
-  const fkeys: { key: string; label: StringKey; onClick: () => void }[] = [
+  const fkeys: { key: string; label: StringKey; onClick: () => void; locks?: boolean }[] = [
     { key: 'F1', label: 'fHelp', onClick: () => window.dispatchEvent(new CustomEvent('ab:help')) },
-    { key: 'F2', label: 'fNew', onClick: () => void addTask() },
+    { key: 'F2', label: 'fNew', onClick: () => void addTask(), locks: true },
     { key: 'F5', label: 'fBackup', onClick: () => window.dispatchEvent(new CustomEvent('ab:run')) },
-    { key: 'F6', label: 'fRestore', onClick: () => setSelection({ kind: 'restore' }) },
+    { key: 'F6', label: 'fRestore', onClick: () => setSelection({ kind: 'restore' }), locks: true },
     { key: 'F8', label: 'fDelete', onClick: () => window.dispatchEvent(new CustomEvent('ab:delete')) },
   ];
 
@@ -146,7 +164,9 @@ export default function App() {
               <li key={task.id}>
                 <button
                   onClick={() => setSelection({ kind: 'task', id: task.id })}
-                  className={`flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                  disabled={busy}
+                  title={busy ? t('busyLocked') : undefined}
+                  className={`disabled:cursor-not-allowed flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
                     selection.kind === 'task' && selection.id === task.id
                       ? 'bg-primary-600 text-white'
                       : 'text-slate-300 light:text-slate-700 hover:bg-slate-800 light:hover:bg-slate-200'
@@ -161,12 +181,19 @@ export default function App() {
               </li>
             ))}
           </ul>
-          <button onClick={() => void addTask()} className="btn-ghost mt-3 w-full">
+          <button
+            onClick={() => void addTask()}
+            disabled={busy}
+            title={busy ? t('busyLocked') : undefined}
+            className="btn-ghost mt-3 w-full"
+          >
             {t('newTask')}
           </button>
           <button
             onClick={() => setSelection({ kind: 'restore' })}
-            className={`mt-2 w-full rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+            disabled={busy}
+            title={busy ? t('busyLocked') : undefined}
+            className={`disabled:cursor-not-allowed disabled:opacity-40 mt-2 w-full rounded-lg px-3 py-2 text-left text-sm transition-colors ${
               selection.kind === 'restore'
                 ? 'bg-primary-600 text-white'
                 : 'text-slate-300 light:text-slate-700 hover:bg-slate-800 light:hover:bg-slate-200'
@@ -233,9 +260,10 @@ export default function App() {
               lang={lang}
               onChange={updateTask}
               onDelete={() => removeTask(selectedTask.id)}
+              onBusyChange={setBusy}
             />
           )}
-          {selection.kind === 'restore' && <RestoreView lang={lang} />}
+          {selection.kind === 'restore' && <RestoreView lang={lang} onBusyChange={setBusy} />}
           {selection.kind === 'none' && (
             <div className="flex h-full items-center justify-center text-slate-500 light:text-slate-600">
               <p>{t('noTasks')}</p>
@@ -245,11 +273,13 @@ export default function App() {
 
         {/* Norton-Commander-style function key bar */}
         <footer className="flex items-center gap-1 border-t border-slate-700/60 light:border-slate-300 bg-slate-950/80 light:bg-white/80 px-3 py-2">
-          {fkeys.map(({ key, label, onClick }) => (
+          {fkeys.map(({ key, label, onClick, locks }) => (
             <button
               key={key}
               onClick={onClick}
-              className="group flex items-center gap-1.5 rounded px-2 py-1 text-xs text-slate-400 light:text-slate-600 transition-colors hover:bg-slate-800 light:hover:bg-slate-200 hover:text-slate-200 light:hover:text-slate-900"
+              disabled={busy && locks}
+              title={busy && locks ? t('busyLocked') : undefined}
+              className="group disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-1.5 rounded px-2 py-1 text-xs text-slate-400 light:text-slate-600 transition-colors hover:bg-slate-800 light:hover:bg-slate-200 hover:text-slate-200 light:hover:text-slate-900"
             >
               <span className="rounded-sm bg-primary-600/90 px-1.5 py-0.5 font-bold text-white group-hover:bg-primary-600">
                 {key}

@@ -29,6 +29,12 @@ export function errorMessage(err: unknown, t: (key: StringKey) => string): strin
     if (err.name === 'NotAllowedError' || err.name === 'SecurityError') return t('errPermission');
     if (err.name === 'NotFoundError') return t('errNotFound');
     if (err.name === 'NotReadableError') return t('errNotReadable');
+    if (err.name === 'NoModificationAllowedError') return t('errLocked');
+  }
+  // Chromium rejects names the target file system can't hold with a TypeError
+  // ("Name is not allowed.") — e.g. "a:b.txt" restored onto Windows
+  if (err instanceof TypeError && /name/i.test(err.message) && /not allowed|invalid/i.test(err.message)) {
+    return t('errBadName');
   }
   return `${t('errGeneric')} ${err instanceof Error ? err.message : String(err)}`;
 }

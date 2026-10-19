@@ -9,6 +9,8 @@ import { errorMessage } from '../errors';
 
 interface Props {
   lang: Lang;
+  /** Reports a running import/restore so the app can lock navigation. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 interface RepoEntry {
@@ -16,7 +18,7 @@ interface RepoEntry {
   handle: FileSystemDirectoryHandle;
 }
 
-export default function RestoreView({ lang }: Props) {
+export default function RestoreView({ lang, onBusyChange }: Props) {
   const t = makeT(lang);
   const [repos, setRepos] = useState<RepoEntry[] | null>(null);
   const [selected, setSelected] = useState<RepoEntry | null>(null);
@@ -30,6 +32,10 @@ export default function RestoreView({ lang }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [failures, setFailures] = useState<RestoreFailure[]>([]);
   const tarInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    onBusyChange?.(running);
+  }, [running, onBusyChange]);
 
   const reset = () => {
     setSelected(null);
@@ -285,7 +291,7 @@ export default function RestoreView({ lang }: Props) {
           <ul className="max-h-48 space-y-1 overflow-y-auto text-xs">
             {failures.slice(0, 200).map((f, i) => (
               <li key={i} className="break-all">
-                <span className="text-slate-500 light:text-slate-600">└─</span> {f.path} — {f.reason}
+                <span className="text-slate-500 light:text-slate-600">└─</span> {f.path} — {errorMessage(f.error, t)}
               </li>
             ))}
             {failures.length > 200 && <li>…</li>}

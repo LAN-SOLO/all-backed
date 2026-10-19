@@ -103,14 +103,14 @@ const de: Content = {
       id: 'tasks',
       title: 'Aufgaben & Quellen',
       body: [
-        'Jede Aufgabe bündelt Quellen, Ziel und Verschlüsselung. Der Name ist frei wählbar; beim ersten erfolgreichen Lauf benennt er den Backup-Ordner im Ziel (allbacked/<name>). Spätere Umbenennungen ändern nur die Anzeige — gesichert wird weiter in denselben Ordner.',
+        'Jede Aufgabe bündelt Quellen, Ziel und Verschlüsselung. Der Name ist frei wählbar; beim ersten Lauf benennt er den Backup-Ordner im Ziel (allbacked/<name>). Spätere Umbenennungen ändern nur die Anzeige — gesichert wird weiter in denselben Ordner. Nutzt bereits eine andere Aufgabe diesen Ordnernamen, bekommt die neue eine Nummer (allbacked/<name>-2), damit sich zwei Aufgaben nie ein Backup teilen.',
         '• Anlegen: F2 oder „+ Neue Aufgabe“ · Löschen: F8 oder „Aufgabe löschen“ (zur Sicherheit zweimal klicken)',
         '• Quellen hinzufügen: „+ Ordner hinzufügen“ (Ordnerauswahl) oder Ordner per Drag & Drop auf die Quellen-Karte ziehen',
         '• Quelle entfernen: [entfernen] neben dem Eintrag',
         'Zu jeder Quelle zeigt all/backed Dateizahl und Gesamtgröße; mehrere Quellen werden in einem Lauf zusammen gesichert. Derselbe Ordner lässt sich nicht doppelt hinzufügen. Haben zwei Quellen denselben Namen (z. B. zweimal „Dokumente“ von verschiedenen Laufwerken), landet die zweite im Backup als „Dokumente (2)“ — nichts wird überschrieben.',
         'Im Archiv-Modus (Safari/Firefox) gelten hinzugefügte Quellen für die laufende Sitzung — nach einem Neuladen wählen Sie sie neu.',
         'Der Statuspunkt in der Seitenleiste zeigt den letzten Lauf: grün = Verify OK, rot = fehlgeschlagen (der Grund steht in der Karte „Letzter Lauf“), leerer Ring = noch nie gesichert.',
-        'Während ein Backup läuft, sind Name, Quellen, Ziel und Löschen gesperrt.',
+        'Während ein Backup oder eine Wiederherstellung läuft, sind Name, Quellen, Ziel und Löschen gesperrt — ebenso der Wechsel zu einer anderen Aufgabe, eine neue Aufgabe und die Wiederherstellen-Ansicht. Beim Schließen des Tabs fragt der Browser nach.',
       ],
     },
     {
@@ -146,6 +146,7 @@ const de: Content = {
         'Der letzte Lauf bleibt sichtbar — als Karte in der Detailansicht und als Statuspunkt in der Seitenleiste.',
         'Schlägt ein Lauf fehl, bleiben frühere Versionen unverändert und weiterhin wiederherstellbar. Die neue Version erscheint erst, wenn die Prüfung bestanden ist.',
         'Gesichert werden Dateien mit Inhalt und relativem Pfad. Leere Ordner, Dateirechte und Änderungszeiten werden beim Wiederherstellen nicht nachgebildet.',
+        'Ist eine Datei während des Laufs gesperrt (z. B. eine geöffnete Outlook-.pst unter Windows), wird sie beim Lesen geändert oder zwischendurch gelöscht, oder ist ein Unterordner nicht lesbar, überspringt all/backed nur diese Einträge. Banner und Karte „Letzter Lauf“ listen sie gelb auf; sie fehlen in dieser Version — Programm schließen und erneut sichern. Fehlende Zugriffsrechte brechen den Lauf dagegen ab.',
       ],
     },
     {
@@ -283,14 +284,14 @@ const en: Content = {
       id: 'tasks',
       title: 'Tasks & sources',
       body: [
-        'Each task bundles sources, destination and encryption. The name is yours to choose; on the first successful run it names the backup folder at the destination (allbacked/<name>). Renaming later only changes the label — backups keep going into the same folder.',
+        'Each task bundles sources, destination and encryption. The name is yours to choose; on the first run it names the backup folder at the destination (allbacked/<name>). Renaming later only changes the label — backups keep going into the same folder. If another task already uses that folder name, the new one gets a number (allbacked/<name>-2), so two tasks never share a backup.',
         '• Create: F2 or “+ New task” · Delete: F8 or “Delete task” (click twice, as a safeguard)',
         '• Add sources: “+ add folder” (folder picker) or drag & drop folders onto the sources card',
         '• Remove a source: [remove] next to the entry',
         'For each source, all/backed shows file count and total size; multiple sources are backed up together in one run. The same folder cannot be added twice. If two sources share a name (e.g. two “Documents” folders from different drives), the second is stored as “Documents (2)” — nothing gets overwritten.',
         'In archive mode (Safari/Firefox), added sources apply to the current session — after a reload, pick them again.',
         'The status dot in the sidebar reflects the last run: green = verify OK, red = failed (the reason is shown in the “Last run” card), empty ring = never backed up.',
-        'While a backup is running, name, sources, destination and delete are locked.',
+        'While a backup or restore is running, name, sources, destination and delete are locked — and so are switching to another task, creating a task and the restore view. Closing the tab asks for confirmation.',
       ],
     },
     {
@@ -326,6 +327,7 @@ const en: Content = {
         'The last run stays visible — as a card in the detail view and as the status dot in the sidebar.',
         'If a run fails, earlier versions remain unchanged and restorable. The new version only appears once verification has passed.',
         'Backed up are files with their content and relative path. Empty folders, permissions and modification times are not recreated on restore.',
+        'If a file is locked during the run (e.g. an open Outlook .pst on Windows), changes while it is being read or is deleted meanwhile, or a subfolder cannot be read, all/backed skips just those entries. The banner and the “Last run” card list them in yellow; they are missing from this version — close the program and back up again. Missing access rights, on the other hand, stop the run.',
       ],
     },
     {

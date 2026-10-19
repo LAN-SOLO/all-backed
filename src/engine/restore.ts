@@ -12,7 +12,9 @@ export interface RestoreOptions {
 
 export interface RestoreFailure {
   path: string;
+  /** Technical reason (English) — the UI translates `error` instead. */
   reason: string;
+  error: unknown;
 }
 
 export interface RestoreResult {
@@ -124,7 +126,7 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
       if (writable) await writable.abort().catch(() => {});
       if (created && dir) await dir.removeEntry(fileName).catch(() => {});
       if (isFatal(err)) throw err;
-      failed.push({ path: entry.path, reason: reasonOf(err) });
+      failed.push({ path: entry.path, reason: reasonOf(err), error: err });
     }
     report({ filesDone: progress.filesDone + 1 });
   }

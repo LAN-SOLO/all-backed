@@ -119,6 +119,13 @@ const STRINGS = {
     restoreFailedSome: 'files could not be restored',
     lastRunFailed: 'failed',
     statsLocked: 'access is requested on the next run',
+    skippedFiles: 'skipped (locked, changed or deleted during the backup) — not in this version',
+    skippedFolder: 'folder not readable',
+    skippedLocked: 'locked or changed while reading',
+    skippedGone: 'no longer exists',
+    busyLocked: 'A backup or restore is running — please wait until it has finished.',
+    errBadName: 'This file or folder name is not allowed on this system (e.g. “a:b.txt” or “CON” on Windows)',
+    errLocked: 'The file is locked by another program — close it and try again',
   },
   de: {
     tagline: '$ allbacked --free --local --encrypted',
@@ -235,6 +242,13 @@ const STRINGS = {
     restoreFailedSome: 'Dateien konnten nicht wiederhergestellt werden',
     lastRunFailed: 'fehlgeschlagen',
     statsLocked: 'Zugriff wird beim nächsten Lauf angefragt',
+    skippedFiles: 'übersprungen (gesperrt, während des Backups geändert oder gelöscht) — nicht in dieser Version',
+    skippedFolder: 'Ordner nicht lesbar',
+    skippedLocked: 'gesperrt oder beim Lesen geändert',
+    skippedGone: 'existiert nicht mehr',
+    busyLocked: 'Ein Backup oder eine Wiederherstellung läuft — bitte warten, bis sie fertig ist.',
+    errBadName: 'Dieser Datei- oder Ordnername ist auf diesem System nicht erlaubt (z. B. „a:b.txt“ oder „CON“ unter Windows)',
+    errLocked: 'Die Datei ist von einem anderen Programm gesperrt — bitte schließen und erneut versuchen',
   },
 } as const;
 
