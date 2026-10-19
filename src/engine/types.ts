@@ -59,6 +59,16 @@ export interface RunSummary {
   encrypted: boolean;
   /** Set when the run failed; the other counters are then 0. */
   error?: string;
+  /** Files/folders skipped because they were locked, changed or deleted. */
+  skippedCount?: number;
+  /** The first skipped entries (capped), folder paths end with '/'. */
+  skipped?: SkippedFile[];
+}
+
+export interface SkippedFile {
+  path: string;
+  /** DOMException name, e.g. NotReadableError / NotFoundError. */
+  reason: string;
 }
 
 export interface BackupTask {
@@ -127,4 +137,18 @@ export function slugify(name: string): string {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '') || 'task'
   );
+}
+
+/**
+ * Repository folder for a task's first run: slugify(name), numbered when
+ * another task already pinned that folder ("neue-aufgabe-2"). Without this,
+ * a renamed task and a new task with the old default name would share one
+ * repository — and with different passphrases the second could never run.
+ */
+export function pickRepoSlug(name: string, takenByOthers: Iterable<string>): string {
+  const taken = new Set([...takenByOthers].map((slug) => slug.toLowerCase()));
+  const base = slugify(name);
+  let slug = base;
+  for (let n = 2; taken.has(slug); n++) slug = `${base}-${n}`;
+  return slug;
 }

@@ -6,9 +6,10 @@ import {
   Progress,
   ProgressFn,
   RunSummary,
+  SkippedFile,
 } from './types';
 import { sha256Hex } from './crypto';
-import { fileExists, walkFiles, writeFile, readFile } from './fsx';
+import { fileExists, isSkippableReadError, walkFiles, writeFile, readFile } from './fsx';
 import { OpenRepo, decodeBlock, encodeBlock, openOrInitRepo, writeManifest } from './repo';
 
 /**
@@ -105,7 +106,13 @@ export async function runBackup(options: BackupOptions): Promise<RunSummary> {
 
   // scan phase: materialize the full file list so progress has a real total
   report({ phase: 'scan' });
-  const plan: { path: string; file: File }[] = [];
+  // handle-based entries keep their handle: the file is re-opened right
+  // before it is read, so a file saved between scan and read is backed up
+  // in its new state instead of failing with NotReadableError
+  const plan: { path: string; file: File; handle?: FileSystemFileHandle }[] = [];
+  const skipped: SkippedFile[] = [];
+  const skip = (path: string, err: unknown) =>
+    skipped.push({ path, reason: err instanceof DOMException ? err.name : String(err) });
   const seenHandles: FileSystemDirectoryHandle[] = [];
   const usedRoots = new Set<string>();
   // two sources with the same folder name (e.g. "Documents" from two drives)
@@ -138,8 +145,16 @@ export async function runBackup(options: BackupOptions): Promise<RunSummary> {
       }
       if (duplicate) continue;
       seenHandles.push(source.handle);
-      for await (const item of walkFiles(source.handle, uniqueRoot(source.handle.name))) {
-        plan.push({ path: item.path, file: await item.handle.getFile() });
+      for await (const item of walkFiles(source.handle, uniqueRoot(source.handle.name), skip)) {
+        let file: File;
+        try {
+          file = await item.handle.getFile();
+        } catch (err) {
+          if (!isSkippableReadError(err)) throw err;
+          skip(item.path, err);
+          continue;
+        }
+        plan.push({ path: item.path, file, handle: item.handle });
         if (plan.length % 50 === 0) report({ path: item.path });
       }
     }
@@ -169,12 +184,34 @@ export async function runBackup(options: BackupOptions): Promise<RunSummary> {
   const files: ManifestFile[] = [];
   let totalBytes = 0;
 
-  for (const entry of plan) {
+  plan: for (const entry of plan) {
     report({ phase: 'backup', path: entry.path });
-    const file = entry.file;
+    // a file that is locked (e.g. an open Outlook .pst on Windows), changed
+    // mid-read or deleted since the scan is skipped and listed — one busy
+    // file must not fail the whole backup
+    let file: File;
+    try {
+      file = entry.handle ? await entry.handle.getFile() : entry.file;
+    } catch (err) {
+      if (!isSkippableReadError(err)) throw err;
+      skip(entry.path, err);
+      report({ filesDone: progress.filesDone + 1 });
+      continue;
+    }
     const chunks: string[] = [];
+    const bytesBefore = progress.bytesDone;
     for (let offset = 0; offset < file.size || offset === 0; offset += chunkSize) {
-      const plain = await file.slice(offset, offset + chunkSize).arrayBuffer();
+      let plain: ArrayBuffer;
+      try {
+        plain = await file.slice(offset, offset + chunkSize).arrayBuffer();
+      } catch (err) {
+        if (!isSkippableReadError(err)) throw err;
+        // blocks already stored for this file are harmless (deduplicated
+        // content); the file just doesn't appear in this version
+        skip(entry.path, err);
+        report({ bytesDone: bytesBefore + file.size, filesDone: progress.filesDone + 1 });
+        continue plan;
+      }
       if (plain.byteLength === 0 && offset > 0) break;
       const hash = await sha256Hex(plain);
       const stored = await storeChunk(repo, hash, plain);
@@ -217,5 +254,11 @@ export async function runBackup(options: BackupOptions): Promise<RunSummary> {
     verifiedOk: true,
     durationMs: Math.round(performance.now() - started),
     encrypted: repo.config.encrypted,
+    ...(skipped.length > 0
+      ? { skippedCount: skipped.length, skipped: skipped.slice(0, MAX_SKIPPED_LISTED) }
+      : {}),
   };
 }
+
+/** How many skipped paths a run summary keeps (it is stored with the task). */
+export const MAX_SKIPPED_LISTED = 100;

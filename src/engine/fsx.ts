@@ -9,14 +9,36 @@ export interface WalkedFile {
   handle: FileSystemFileHandle;
 }
 
+/**
+ * Read errors that affect a single file or subfolder (locked by another
+ * program, changed or deleted while the backup runs, unreadable folder).
+ * They skip that entry; everything else (permission, quota) stays fatal.
+ */
+export function isSkippableReadError(err: unknown): boolean {
+  return (
+    err instanceof DOMException &&
+    (err.name === 'NotReadableError' || err.name === 'NotFoundError')
+  );
+}
+
 export async function* walkFiles(
   dir: FileSystemDirectoryHandle,
-  prefix = ''
+  prefix = '',
+  onSkip?: (path: string, err: unknown) => void
 ): AsyncGenerator<WalkedFile> {
   for await (const [name, handle] of dir.entries()) {
     const path = prefix ? `${prefix}/${name}` : name;
     if (handle.kind === 'file') {
       yield { path, handle };
+    } else if (onSkip) {
+      // an unreadable subfolder (e.g. a protected system folder on a
+      // Windows drive) skips that folder instead of failing the whole run
+      try {
+        yield* walkFiles(handle, path, onSkip);
+      } catch (err) {
+        if (!isSkippableReadError(err)) throw err;
+        onSkip(`${path}/`, err);
+      }
     } else {
       yield* walkFiles(handle, path);
     }

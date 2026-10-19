@@ -2,7 +2,7 @@
 // so tasks keep their source/destination across sessions; Chrome re-prompts
 // for permission on first use after a restart.
 
-import { BackupTask } from './types';
+import { BackupTask, pickRepoSlug } from './types';
 
 const DB_NAME = 'allbacked';
 const STORE = 'tasks';
@@ -64,4 +64,13 @@ export function newTask(name: string): BackupTask {
     dest: null,
     lastRun: null,
   };
+}
+
+/** The task's repository folder — pinned slug, or a fresh collision-free one. */
+export async function claimRepoSlug(task: BackupTask): Promise<string> {
+  if (task.repoSlug) return task.repoSlug;
+  const others = (await loadTasks())
+    .filter((other) => other.id !== task.id && other.repoSlug)
+    .map((other) => other.repoSlug as string);
+  return pickRepoSlug(task.name, others);
 }

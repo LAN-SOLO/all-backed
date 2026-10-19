@@ -165,10 +165,16 @@ export async function* iterTar(archive: Blob): AsyncGenerator<TarFileRef> {
     }
     let size = parseInt(sizeField || '0', 8);
     // header checksum: catches non-tar files and truncated/damaged archives
+    // (some old writers sum signed bytes — accept both, like GNU/bsdtar)
     let sum = 0;
-    for (let i = 0; i < BLOCK; i++) sum += i >= 148 && i < 156 ? 32 : head[i];
+    let signedSum = 0;
+    for (let i = 0; i < BLOCK; i++) {
+      const byte = i >= 148 && i < 156 ? 32 : head[i];
+      sum += byte;
+      signedSum += byte > 127 ? byte - 256 : byte;
+    }
     const stored = parseInt(readStr(148, 8).trim() || 'x', 8);
-    if (stored !== sum) {
+    if (stored !== sum && stored !== signedSum) {
       throw new Error(`not a valid tar archive (checksum mismatch at byte ${pos})`);
     }
     const typeflag = String.fromCharCode(head[156]);

@@ -9,7 +9,7 @@ import { findRepos, listManifests, openRepo } from './repo';
 import { walkFiles, readFile, writeFile, getDirByPath } from './fsx';
 import { buildTar, tarDirectory, untarToDirectory } from './tar';
 import { gzip, sha256Hex } from './crypto';
-import { EngineError } from './types';
+import { EngineError, pickRepoSlug } from './types';
 
 type Log = (line: string) => void;
 
@@ -282,12 +282,131 @@ async function regressionTests(opfs: FileSystemDirectoryHandle, t: (m: string) =
     truncatedRejected = true;
   }
   if (!garbageRejected || !truncatedRejected) throw new Error('R8: invalid tar archive was accepted');
+  // old writers store a signed-byte header checksum — still readable
+  const signedTar = new Uint8Array(
+    await buildTar([{ path: 'grüße.txt', data: new TextEncoder().encode('hi').buffer as ArrayBuffer }]).arrayBuffer()
+  );
+  let signedSum = 0;
+  for (let i = 0; i < 512; i++) {
+    const byte = i >= 148 && i < 156 ? 32 : signedTar[i];
+    signedSum += byte > 127 ? byte - 256 : byte;
+  }
+  signedTar.set(new TextEncoder().encode(`${signedSum.toString(8).padStart(6, '0')}\0 `), 148);
+  const signedOut = await fresh('signed-out');
+  await untarToDirectory(new Blob([signedTar]), signedOut);
+  if ((await treeText(signedOut)).get('grüße.txt') !== 'hi') throw new Error('R8: signed-checksum tar rejected');
   t('R8 tar zip-slip / garbage / truncation handled');
 
   // R9: content addressing sanity — block names are SHA-256 of plaintext
   if ((await sha256Hex(new ArrayBuffer(0))) !== 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855') {
     throw new Error('R9: sha256 mismatch');
   }
+
+  // R10: a locked, vanished or changed file and an unreadable subfolder
+  // skip only themselves — before 1.0 one busy file failed the whole run.
+  // Wrapper handles simulate what Chromium throws (NotReadableError for a
+  // locked file or a File snapshot that changed, NotFoundError when deleted).
+  const skipDst = await fresh('skip-dst');
+  const real = await fresh('skip-real');
+  await writeFile(real, 'ok.txt', 'still fine');
+  await writeFile(real, 'edited.txt', 'old content');
+  const okHandle = await real.getFileHandle('ok.txt');
+  const editedHandle = await real.getFileHandle('edited.txt');
+  const domErr = (name: string) => new DOMException(`simulated ${name}`, name);
+  const lockedHandle = {
+    kind: 'file',
+    name: 'outlook.pst',
+    getFile: async () =>
+      ({
+        size: 8,
+        lastModified: 0,
+        slice: () => ({ arrayBuffer: () => Promise.reject(domErr('NotReadableError')) }),
+      }) as unknown as File,
+  };
+  const goneHandle = { kind: 'file', name: 'gone.tmp', getFile: () => Promise.reject(domErr('NotFoundError')) };
+  const badDir = {
+    kind: 'directory',
+    name: 'System Volume Information',
+    // eslint-disable-next-line require-yield
+    entries: async function* () {
+      throw domErr('NotReadableError');
+    },
+  };
+  const mixed = {
+    kind: 'directory',
+    name: 'mixed',
+    entries: async function* () {
+      yield ['ok.txt', okHandle];
+      yield ['outlook.pst', lockedHandle];
+      yield ['gone.tmp', goneHandle];
+      yield ['System Volume Information', badDir];
+      yield ['edited.txt', editedHandle];
+    },
+    isSameEntry: async (other: unknown) => other === mixed,
+  } as unknown as FileSystemDirectoryHandle;
+  let edited = false;
+  const skipRun = await runBackup({
+    sources: [{ kind: 'handle', handle: mixed }],
+    dest: skipDst,
+    taskName: 'skip',
+    // the file is saved again after the scan, before it is read: the backup
+    // must contain the new content (a stale File snapshot would throw)
+    onProgress: (p) => {
+      if (p.phase === 'backup' && !edited) {
+        edited = true;
+        void writeFile(real, 'edited.txt', 'new content after the scan');
+      }
+    },
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  const skippedPaths = (skipRun.skipped ?? []).map((s) => s.path).sort();
+  if (
+    skipRun.fileCount !== 2 ||
+    skipRun.skippedCount !== 3 ||
+    JSON.stringify(skippedPaths) !== JSON.stringify(['mixed/System Volume Information/', 'mixed/gone.tmp', 'mixed/outlook.pst'])
+  ) {
+    throw new Error(`R10: files=${skipRun.fileCount} skipped=${JSON.stringify(skipRun.skipped)}`);
+  }
+  const skipRepo = await openRepo(await getDirByPath(skipDst, ['allbacked', 'skip'], false));
+  const skipOut = await fresh('skip-out');
+  await runRestore({ repo: skipRepo, manifestName: skipRun.manifestName, target: skipOut });
+  const skipTree = await treeText(skipOut);
+  if (skipTree.get('mixed/ok.txt') !== 'still fine' || skipTree.size !== 2) {
+    throw new Error(`R10: restore layout ${JSON.stringify([...skipTree])}`);
+  }
+  const editedText = skipTree.get('mixed/edited.txt');
+  if (editedText !== 'new content after the scan' && editedText !== 'old content') {
+    throw new Error(`R10: edited file restored as ${JSON.stringify(editedText)}`);
+  }
+  // permission problems stay fatal — a run must not "succeed" with nothing
+  const denied = {
+    kind: 'directory',
+    name: 'denied',
+    entries: async function* () {
+      yield ['x.txt', { kind: 'file', name: 'x.txt', getFile: () => Promise.reject(domErr('NotAllowedError')) }];
+    },
+    isSameEntry: async () => false,
+  } as unknown as FileSystemDirectoryHandle;
+  let deniedFatal = false;
+  try {
+    await runBackup({ sources: [{ kind: 'handle', handle: denied }], dest: await fresh('denied-dst'), taskName: 'denied' });
+  } catch (err) {
+    deniedFatal = err instanceof DOMException && err.name === 'NotAllowedError';
+  }
+  if (!deniedFatal) throw new Error('R10: NotAllowedError was swallowed');
+  t(`R10 locked/vanished files and unreadable folders skipped and listed (edited file: ${editedText === 'old content' ? 'old' : 'new'} content)`);
+
+  // R11: a new task never shares the repository another task pinned
+  if (
+    pickRepoSlug('Neue Aufgabe', []) !== 'neue-aufgabe' ||
+    pickRepoSlug('Neue Aufgabe', ['neue-aufgabe']) !== 'neue-aufgabe-2' ||
+    pickRepoSlug('Neue Aufgabe', ['neue-aufgabe', 'neue-aufgabe-2']) !== 'neue-aufgabe-3' ||
+    pickRepoSlug('Fotos Übersicht', ['other']) !== 'fotos-uebersicht' ||
+    pickRepoSlug('日本語', []) !== 'task'
+  ) {
+    throw new Error('R11: pickRepoSlug');
+  }
+  t('R11 repository folder of a new task never collides with a pinned one');
 
   await opfs.removeEntry('ab-reg', { recursive: true }).catch(() => {});
 }
