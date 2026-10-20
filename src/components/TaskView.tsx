@@ -199,13 +199,18 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
     if (!supportsFsAccess) return;
     let cancelled = false;
     (async () => {
+      // the destination's own allbacked/ folder is not backed up (it may lie
+      // inside a source), so it does not count here either
+      const repoDir = task.dest
+        ? await task.dest.getDirectoryHandle(REPO_DIR).catch(() => undefined)
+        : undefined;
       for (const [index, handle] of task.sources.entries()) {
         const key = `${index}:${handle.name}`;
         if (handleStats[key] && handleStats[key].files >= 0) continue;
         let files = 0;
         let bytes = 0;
         try {
-          for await (const item of walkFiles(handle)) {
+          for await (const item of walkFiles(handle, '', undefined, repoDir)) {
             files += 1;
             bytes += (await item.handle.getFile()).size;
           }

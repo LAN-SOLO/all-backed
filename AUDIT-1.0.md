@@ -368,7 +368,7 @@ Chromium fahren, Restpunkte aus 9.4 schließen. Tauri-Werkzeuge (Windows-
 | --- | --- |
 | `pnpm test` (Node, memfs) | PASS — Basis + R1–R8, R10–R21 |
 | `tests/ui/self.mjs` — `abSelfTest()` in echtem Chromium (chrome-headless-shell 1217, echtes OPFS) | PASS inkl. R18–R21 |
-| `tests/ui/journeys.mjs` DE dunkel 1024×700 und EN hell 760×520 | je 20/20 PASS (J1–J8, s. u.) |
+| `tests/ui/journeys.mjs` DE dunkel 1024×700, EN hell 760×520, EN dunkel 1024×700 | je 21/21 PASS (J1–J8, s. u.) |
 | `tests/ui/flow.mjs` DE dunkel 760×520 / EN hell 640×480 | 6/6 PASS |
 | `tests/ui/archive.mjs` EN hell / DE dunkel | 5/5 PASS |
 | Negativkontrolle R21 (alter Dedup-Check `getFileHandle` ohne Größe, Manifestliste ohne Größenfilter) | FAIL („Entschlüsselung fehlgeschlagen — falsche Passphrase?“ durch leeres Manifest) |
@@ -400,6 +400,7 @@ J8 Archiv-Modus: gleicher Ordner doppelt abgelehnt. Kein horizontaler Überlauf.
 | R3-4 | mittel | Ziel **innerhalb einer Quelle** (Dokumente → Dokumente/Backup): jeder Lauf sicherte das eigene Repository mit (wächst mit jedem Lauf); eine Quelle innerhalb von `allbacked/` sicherte verschlüsselte Blöcke in sich selbst | Scan überspringt den `allbacked`-Ordner des Ziels (`isSameEntry`); Quelle in `allbacked/` → `source-in-repo` mit DE/EN-Meldung — R19, J2 |
 | R3-5 | mittel | Schreibfehler auf dem **Restore-Ziel** bei kurzen Sperren wurden nicht wiederholt | gleiche Wiederholung wie beim Backup-Ziel (150/500/1500 ms, ganze Datei, atomar), danach gelistet; bestehende Datei behält Inhalt — R20, J7 |
 | R3-6 | niedrig | **Falsche Meldung bei vollem Laufwerk** im Direktmodus: „Der Browser-Speicher reicht nicht aus … in Chrome direkt in einen Ordner sichern“ — obwohl schon direkt in einen Ordner gesichert wurde | Direktmodus: „Das Ziel-Laufwerk ist voll — dort Platz schaffen oder einen anderen Ordner wählen“; Archiv-Modus unverändert — J4 |
+| R3-8 | niedrig | Dateizahl/Größe einer Quelle zählte den `allbacked`-Ordner mit, wenn das Ziel in der Quelle liegt (Anzeige ≠ Gesichertes) | Statistik überspringt ihn ebenso — J6 (72 Dateien) |
 | R3-7 | niedrig | Hilfe „Derselbe Ordner lässt sich nicht doppelt hinzufügen“ stimmte im **Archiv-Modus** nicht | gleicher Name + gleiche Dateien (Pfad, Größe, Datum) → „bereits in der Liste“; Test-Brücke nutzt denselben Pfad — J8 |
 
 Hilfe (DE + EN) und README angepasst: reservierter Name `allbacked`, Ziel in

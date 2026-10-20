@@ -135,6 +135,8 @@ export default async ({ ev, shot, nav, view, check }) => {
   await ev(SETUP(false));
   r = await step('J6 after reload', `await h.sleep(500); const all = await K.dest.getDirectoryHandle('allbacked'); let repoDir; for await (const [, d] of all.entries()) repoDir = d; const man = await repoDir.getDirectoryHandle('manifests'); let n = 0; for await (const _ of man.keys()) n++; const card = [...document.querySelectorAll('.card')].find((c) => c.innerText.toLowerCase().includes(T('lastRun').toLowerCase())); return { manifests: n, task: h.text().includes('${lang === 'de' ? 'Neue Aufgabe' : 'New task'}'), card: card && card.innerText.slice(0, 200) };`);
   check(r.manifests === 2 && r.task, 'J6 reload mid-run: task kept, no half version', r);
+  r = await step('J6 source stats', `await h.sleep(800); const li = [...document.querySelectorAll('main li')].find((x) => x.innerText.includes('J-Home')); return li && li.innerText;`);
+  check(/\b72\b/.test(r || ''), 'J6 source stats exclude the repository inside the source (72 files)', r);
   r = await step('J6 rerun', `await h.type(document.querySelector('input[type=password]'), 'reise-nach-jerusalem'); await h.key('F5'); await h.idle(); await h.sleep(300); return { status: h.status(), alert: h.alert() };`);
   check(r.alert === '' && r.status.includes(await ev(`window.__T('verified')`)), 'J6 run after restart succeeds', r);
   await step('ok', `const b = h.btn(/^OK$/); if (b) { b.click(); await h.sleep(300); } return 1;`);
