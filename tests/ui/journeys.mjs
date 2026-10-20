@@ -28,7 +28,7 @@ window.__h = {
 // (NoModificationAllowedError on close), and a cancelled picker (AbortError).
 const FAULTS = `(() => {
   if (window.__faults) return 1;
-  const f = (window.__faults = { quota: false, deny: null, lockNames: new Map(), lockAttempts: 0 });
+  const f = (window.__faults = { lockAll: false, quota: false, deny: null, lockNames: new Map(), lockAttempts: 0 });
   const names = new WeakMap();
   const P = FileSystemFileHandle.prototype, W = FileSystemWritableFileStream.prototype, D = FileSystemHandle.prototype;
   const cw = P.createWritable;
@@ -37,7 +37,7 @@ const FAULTS = `(() => {
   W.write = function (...a) { if (f.quota) return Promise.reject(new DOMException('The disk is full.', 'QuotaExceededError')); return wr.apply(this, a); };
   const cl = W.close;
   W.close = async function () {
-    const n = names.get(this); const left = f.lockNames.get(n) ?? 0;
+    const n = names.get(this); const left = f.lockAll ? 1 : f.lockNames.get(n) ?? 0;
     if (left > 0) { f.lockNames.set(n, left - 1); await this.abort(); throw new DOMException('locked', 'NoModificationAllowedError'); }
     return cl.call(this);
   };
@@ -158,6 +158,8 @@ export default async ({ ev, shot, nav, view, check }) => {
   r = await step('J7 lasting lock', `F.lockNames.set('Brief.txt', 99); K.queue.push(K.restore); await h.click(/Diese Version wiederherstellen|Restore this version/); await h.sleep(600); await h.click(/Überschreiben|Overwrite/); await h.idle(); await h.sleep(500); F.lockNames.clear(); return { alert: h.alert(), brief: await (await (await (await K.restore.getDirectoryHandle('J-Home')).getFileHandle('Brief.txt')).getFile()).text() };`);
   check(r.alert.includes('Brief.txt') && r.alert.includes(await ev(`window.__T('errLocked')`)) && r.brief === 'Sehr geehrte Damen und Herren', 'J7 lasting lock: only that file listed (translated), old content kept', r);
   await shot(`${P}-j7-locked.png`);
+  r = await step('J7 read-only target', `const ro = await (await navigator.storage.getDirectory()).getDirectoryHandle('J-RO', { create: true }); F.lockAll = true; K.queue.push(ro); const t0 = Date.now(); await h.click(/Diese Version wiederherstellen|Restore this version/); await h.idle(); await h.sleep(300); F.lockAll = false; const left = await h.tree(ro); await (await navigator.storage.getDirectory()).removeEntry('J-RO', { recursive: true }); return { alert: h.alert(), ms: Date.now() - t0, left: left.length };`);
+  check(r.alert.includes(await ev(`window.__T('errTargetLocked')`)) && r.left === 0 && r.ms < 20000, 'J7 read-only target: restore stops with one clear message, nothing left behind', r);
   check((await ev(`document.documentElement.scrollWidth - innerWidth`)) <= 0, 'no horizontal overflow');
 
   // J8 archive mode: the same folder twice is refused

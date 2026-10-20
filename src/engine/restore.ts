@@ -52,6 +52,9 @@ export interface RestoreResult {
   renamed: RestoreRename[];
 }
 
+/** Consecutive persistently locked files after which a restore stops. */
+export const MAX_LOCKED_IN_ROW = 3;
+
 function reasonOf(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
@@ -93,6 +96,7 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
   const renamed: RestoreRename[] = [];
   let restoredFiles = 0;
   let restoredBytes = 0;
+  let lockedInRow = 0;
   // target names are decided here, before anything is written: portable on
   // every system and unique on case-insensitive volumes
   const planned = planRestorePaths(manifest.files.map((entry) => safeRelativePath(entry.path)!));
@@ -154,6 +158,7 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
         restoredFiles += 1;
         restoredBytes += written;
         if (isRenamed) renamed.push({ path: entry.path, to: parts.join('/') });
+        lockedInRow = 0;
         break;
       } catch (err) {
         // never commit a half-written file: abort discards the swap file (an
@@ -169,6 +174,12 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
           continue;
         }
         failed.push({ path: entry.path, reason: reasonOf(err), error: err });
+        // several files in a row still locked after every retry: the
+        // target as a whole refuses writes (read-only volume, a folder held
+        // by another program) — stop instead of retrying every file
+        if (isTransientWriteError(err) && ++lockedInRow >= MAX_LOCKED_IN_ROW) {
+          throw new EngineError('target-locked', `Target "${options.target.name}" refuses writes.`, options.target.name);
+        }
         break;
       }
     }

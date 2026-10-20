@@ -798,7 +798,21 @@ async function regressionTests(opfs: FileSystemDirectoryHandle, t: (m: string) =
   ) {
     throw new Error(`R20: files=${lockRun.fileCount} failed=${JSON.stringify(lockRun.failed.map((f) => f.path))} attempts=${lockAttempts}`);
   }
-  t('R20 locked restore target files retried, a lasting lock lists only that file');
+  // a target that refuses every write (read-only volume) stops after three
+  // files in a row instead of retrying each of thousands of files
+  const roOut = await fresh('ro-out');
+  for (const n of ['c0.bin', 'c1.bin', 'c2.bin', 'c3.bin', 'c4.bin', 'c5.bin']) locks.set(n, 99);
+  lockAttempts = 0;
+  let roErr: unknown = null;
+  try {
+    await runRestore({ repo: cancelRepo, manifestName: afterCancel.manifestName, target: lockedDir(roOut), retryDelays: [1, 1, 1] });
+  } catch (err) {
+    roErr = err;
+  }
+  if (!(roErr instanceof EngineError && roErr.code === 'target-locked') || lockAttempts !== 3 * 4 || (await treeText(roOut)).size !== 0) {
+    throw new Error(`R20: read-only target err=${String(roErr)} attempts=${lockAttempts}`);
+  }
+  t('R20 locked restore target files retried, a lasting lock lists only that file, a read-only target stops');
 
   // R21: an interrupted block/manifest write (tab closed, crash, drive full)
   // leaves a 0-byte file — it must not count as stored ("dedup") forever,

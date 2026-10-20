@@ -111,7 +111,9 @@ Audit, Testmatrix und manuelle Checkliste für 1.0: `AUDIT-1.0.md`.
 - Schreibfehler auf dem Restore-Ziel bei kurzen Sperren
   (`NoModificationAllowedError`/`InvalidStateError`) werden wie beim
   Backup-Ziel bis zu dreimal wiederholt (ganze Datei, atomar); dauerhaft
-  gesperrte Dateien werden gelistet, eine bestehende Datei bleibt unverändert.
+  gesperrte Dateien werden gelistet, eine bestehende Datei bleibt unverändert;
+  drei dauerhaft gesperrte Dateien in Folge (schreibgeschütztes Ziel) beenden
+  den Restore mit `target-locked`.
 - Der Name `allbacked` ist für den Repository-Ordner reserviert: Eine Quelle
   dieses Namens wird als `allbacked (2)` gesichert, ältere Backups werden so
   wiederhergestellt. Liegt das Ziel in einer Quelle, wird der eigene

@@ -27,6 +27,7 @@ const ENGINE_KEYS: Record<EngineError['code'], StringKey> = {
   'archive-invalid': 'errArchiveInvalid',
   'archive-truncated': 'errArchiveTruncated',
   'source-in-repo': 'errSourceInRepo',
+  'target-locked': 'errTargetLocked',
 };
 
 // codes whose detail helps (which file/block/folder) — appended in parens
@@ -36,6 +37,7 @@ const WITH_DETAIL = new Set<EngineError['code']>([
   'block-corrupt',
   'permission-denied',
   'source-in-repo',
+  'target-locked',
 ]);
 
 export function describeError(err: unknown): ErrorInfo {

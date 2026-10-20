@@ -133,7 +133,8 @@ export class EngineError extends Error {
       | 'block-corrupt'
       | 'archive-invalid'
       | 'archive-truncated'
-      | 'source-in-repo',
+      | 'source-in-repo'
+      | 'target-locked',
     message: string,
     /**
      * Language-neutral detail the UI may show next to the translated text
