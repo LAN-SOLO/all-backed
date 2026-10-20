@@ -24,23 +24,32 @@ export function isSkippableReadError(err: unknown): boolean {
 export async function* walkFiles(
   dir: FileSystemDirectoryHandle,
   prefix = '',
-  onSkip?: (path: string, err: unknown) => void
+  onSkip?: (path: string, err: unknown) => void,
+  /**
+   * A folder that is never entered — the backup's own `allbacked` folder
+   * when the destination lies inside a source (otherwise every run would
+   * back up the repository into itself).
+   */
+  exclude?: FileSystemDirectoryHandle
 ): AsyncGenerator<WalkedFile> {
   for await (const [name, handle] of dir.entries()) {
     const path = prefix ? `${prefix}/${name}` : name;
     if (handle.kind === 'file') {
       yield { path, handle };
-    } else if (onSkip) {
+      continue;
+    }
+    if (exclude && (await exclude.isSameEntry(handle).catch(() => false))) continue;
+    if (onSkip) {
       // an unreadable subfolder (e.g. a protected system folder on a
       // Windows drive) skips that folder instead of failing the whole run
       try {
-        yield* walkFiles(handle, path, onSkip);
+        yield* walkFiles(handle, path, onSkip, exclude);
       } catch (err) {
         if (!isSkippableReadError(err)) throw err;
         onSkip(`${path}/`, err);
       }
     } else {
-      yield* walkFiles(handle, path);
+      yield* walkFiles(handle, path, undefined, exclude);
     }
   }
 }
@@ -71,14 +80,44 @@ export async function writeFile(
   name: string,
   data: ArrayBuffer | Blob | string
 ): Promise<void> {
-  const handle = await dir.getFileHandle(name, { create: true });
-  const writable = await handle.createWritable();
+  // getFileHandle({ create: true }) creates an EMPTY file at once; if the
+  // write then fails (drive full, lock) that empty file must not stay — a
+  // 0-byte block would otherwise count as "already stored" forever
+  let created = false;
+  let handle: FileSystemFileHandle;
   try {
+    handle = await dir.getFileHandle(name);
+  } catch (err) {
+    if (!(err instanceof DOMException && err.name === 'NotFoundError')) throw err;
+    handle = await dir.getFileHandle(name, { create: true });
+    created = true;
+  }
+  let writable: FileSystemWritableFileStream | null = null;
+  try {
+    writable = await handle.createWritable();
     await writable.write(data);
     await writable.close();
   } catch (err) {
-    await writable.abort().catch(() => {});
+    if (writable) await writable.abort().catch(() => {});
+    if (created) await dir.removeEntry(name).catch(() => {});
     throw err;
+  }
+}
+
+/**
+ * True when `name` exists with content. A 0-byte file is what an
+ * interrupted write leaves behind (tab closed, browser crash, drive pulled
+ * between create and close) — every stored block and manifest has at least
+ * a gzip header, so an empty one is never valid and is written again.
+ */
+export async function nonEmptyFileExists(
+  dir: FileSystemDirectoryHandle,
+  name: string
+): Promise<boolean> {
+  try {
+    return (await (await dir.getFileHandle(name)).getFile()).size > 0;
+  } catch {
+    return false;
   }
 }
 

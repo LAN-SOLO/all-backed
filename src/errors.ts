@@ -5,6 +5,7 @@
 // a failed run stores the ErrorInfo — so its "Last run" card follows a later
 // EN/DE switch instead of showing the language of the failure.
 import { EngineError } from './engine/types';
+import { supportsFsAccess } from './engine/caps';
 import { StringKey, isStringKey } from './i18n';
 
 export interface ErrorInfo {
@@ -25,6 +26,7 @@ const ENGINE_KEYS: Record<EngineError['code'], StringKey> = {
   'block-corrupt': 'errBlockCorrupt',
   'archive-invalid': 'errArchiveInvalid',
   'archive-truncated': 'errArchiveTruncated',
+  'source-in-repo': 'errSourceInRepo',
 };
 
 // codes whose detail helps (which file/block/folder) — appended in parens
@@ -33,6 +35,7 @@ const WITH_DETAIL = new Set<EngineError['code']>([
   'manifest-invalid',
   'block-corrupt',
   'permission-denied',
+  'source-in-repo',
 ]);
 
 export function describeError(err: unknown): ErrorInfo {
@@ -43,7 +46,9 @@ export function describeError(err: unknown): ErrorInfo {
   if (err instanceof DOMException) {
     if (err.name === 'AbortError') return { keys: ['errCancelled'] };
     if (err.name === 'QuotaExceededError' || err.name === 'UnknownError') {
-      return { keys: ['errQuota', 'errDirectHint'] };
+      // direct mode writes to a real folder: there it is the drive that is
+      // full, not browser storage (archive mode stages in OPFS)
+      return supportsFsAccess ? { keys: ['errDiskFull'] } : { keys: ['errQuota', 'errDirectHint'] };
     }
     if (err.name === 'NotAllowedError' || err.name === 'SecurityError') return { keys: ['errPermission'] };
     if (err.name === 'NotFoundError') return { keys: ['errNotFound'] };

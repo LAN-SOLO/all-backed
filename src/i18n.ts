@@ -97,6 +97,7 @@ const STRINGS = {
     destNoDirect:
       'This browser cannot write into folders (Safari/Firefox) — use Chrome to back up straight to a drive. Here, keep the downloaded .tar archive on your target drive instead.',
     errQuota: 'Not enough browser storage for this backup',
+    errDiskFull: 'The target drive is full — free up space there or choose a different folder, then try again',
     errQuotaNeeded: 'needed',
     errQuotaFree: 'free',
     errDirectHint:
@@ -132,6 +133,8 @@ const STRINGS = {
     errArchiveTruncated: 'The .tar archive is incomplete — the download or copy was cut off. Use the complete file',
     errTypeMismatch: 'A file and a folder with the same name are in the way in the target folder',
     errTargetInRepo: 'This folder belongs to the backup itself — choose a different target folder.',
+    errTargetContainsRepo: 'This folder contains the backup itself (allbacked) — choose a different target folder, e.g. a new empty one.',
+    errSourceInRepo: 'A source folder lies inside the backup folder (allbacked) — remove it and choose the folder with your own files',
     errSaveFailed: 'The change could not be saved in browser storage:',
     cancel: 'Cancel',
     cancelling: 'cancelling…',
@@ -238,6 +241,7 @@ const STRINGS = {
     destNoDirect:
       'Dieser Browser kann nicht direkt in Ordner schreiben (Safari/Firefox) — für Backups direkt aufs Laufwerk Chrome nutzen. Hier stattdessen das heruntergeladene .tar-Archiv auf dem Ziel-Laufwerk ablegen.',
     errQuota: 'Der Browser-Speicher reicht für dieses Backup nicht aus',
+    errDiskFull: 'Das Ziel-Laufwerk ist voll — dort Platz schaffen oder einen anderen Ordner wählen und erneut versuchen',
     errQuotaNeeded: 'benötigt',
     errQuotaFree: 'frei',
     errDirectHint:
@@ -273,6 +277,8 @@ const STRINGS = {
     errArchiveTruncated: 'Das .tar-Archiv ist unvollständig — Download oder Kopie wurde abgeschnitten. Bitte die vollständige Datei verwenden',
     errTypeMismatch: 'Im Zielordner steht eine Datei bzw. ein Ordner gleichen Namens im Weg',
     errTargetInRepo: 'Dieser Ordner gehört zum Backup selbst — bitte einen anderen Zielordner wählen.',
+    errTargetContainsRepo: 'Dieser Ordner enthält das Backup selbst (allbacked) — bitte einen anderen Zielordner wählen, z. B. einen neuen leeren.',
+    errSourceInRepo: 'Eine Quelle liegt im Backup-Ordner (allbacked) — bitte entfernen und den Ordner mit Ihren eigenen Dateien wählen',
     errSaveFailed: 'Die Änderung konnte nicht im Browser-Speicher gesichert werden:',
     cancel: 'Abbrechen',
     cancelling: 'breche ab…',

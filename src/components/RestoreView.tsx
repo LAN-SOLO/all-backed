@@ -218,6 +218,10 @@ export default function RestoreView({ lang, onBusyChange }: Props) {
         setError(t('errTargetInRepo'));
         return;
       }
+      if (check.containsRepo) {
+        setError(t('errTargetContainsRepo'));
+        return;
+      }
       if (check.existing.length > 0) {
         setPending({ manifestName, target, existing: check.existing });
         return;

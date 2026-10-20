@@ -1,6 +1,6 @@
 import { EngineError, Manifest, Progress, ProgressFn } from './types';
 import { sha256Hex } from './crypto';
-import { getDirByPath, readFile } from './fsx';
+import { WRITE_RETRY_DELAYS, getDirByPath, isTransientWriteError, readFile } from './fsx';
 import { OpenRepo, decodeBlock, readManifest, safeRelativePath } from './repo';
 import { planRestorePaths } from './portable';
 
@@ -14,6 +14,8 @@ export interface RestoreOptions {
    * written is discarded; files finished before stay in the target.
    */
   signal?: AbortSignal;
+  /** Delays between write attempts on a locked target file (self-test hook). */
+  retryDelays?: number[];
 }
 
 export interface RestoreRename {
@@ -95,65 +97,80 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
   // every system and unique on case-insensitive volumes
   const planned = planRestorePaths(manifest.files.map((entry) => safeRelativePath(entry.path)!));
   const signal = options.signal;
+  const retryDelays = options.retryDelays ?? WRITE_RETRY_DELAYS;
 
   for (const [index, entry] of manifest.files.entries()) {
     signal?.throwIfAborted();
     report({ path: entry.path });
     const { parts, renamed: isRenamed } = planned[index];
     const fileName = parts[parts.length - 1];
-    let writable: FileSystemWritableFileStream | null = null;
-    let dir: FileSystemDirectoryHandle | null = null;
-    let created = false;
-    let written = 0;
-    try {
-      dir = await getDirByPath(options.target, parts.slice(0, -1), true);
-      let handle: FileSystemFileHandle;
+    // a short lock on the target file (virus scanner, search indexer,
+    // OneDrive on Windows) is retried like on the backup destination: the
+    // whole file is written again, close() commits atomically
+    for (let attempt = 0; ; attempt++) {
+      let writable: FileSystemWritableFileStream | null = null;
+      let dir: FileSystemDirectoryHandle | null = null;
+      let created = false;
+      let written = 0;
       try {
-        handle = await dir.getFileHandle(fileName);
-      } catch (err) {
-        if (!(err instanceof DOMException && err.name === 'NotFoundError')) throw err;
-        handle = await dir.getFileHandle(fileName, { create: true });
-        created = true;
-      }
-      writable = await handle.createWritable();
-      for (const hash of entry.chunks) {
-        signal?.throwIfAborted();
-        const blockDir = await options.repo.blocks.getDirectoryHandle(hash.slice(0, 2));
-        const plain = await decodeBlock(options.repo, await readFile(blockDir, hash)).catch(
-          (err: unknown) => {
-            // the passphrase was already proven on the manifest, so a block
-            // that fails authentication is damaged, not "wrong passphrase"
-            if (err instanceof EngineError && err.code === 'passphrase-wrong') {
-              throw new EngineError('block-corrupt', `Block ${hash.slice(0, 12)}… is damaged.`, `${hash.slice(0, 12)}…`);
-            }
-            throw err;
-          }
-        );
-        // content addressing doubles as an integrity check: the decoded
-        // chunk must hash to its name (catches bit rot and swapped blocks
-        // in unencrypted repositories; GCM already covers encrypted ones)
-        if ((await sha256Hex(plain)) !== hash) {
-          throw new EngineError('block-corrupt', `Block ${hash.slice(0, 12)}… is damaged.`, `${hash.slice(0, 12)}…`);
+        dir = await getDirByPath(options.target, parts.slice(0, -1), true);
+        let handle: FileSystemFileHandle;
+        try {
+          handle = await dir.getFileHandle(fileName);
+        } catch (err) {
+          if (!(err instanceof DOMException && err.name === 'NotFoundError')) throw err;
+          handle = await dir.getFileHandle(fileName, { create: true });
+          created = true;
         }
-        await writable.write(plain);
-        written += plain.byteLength;
-        report({ bytesDone: progress.bytesDone + plain.byteLength });
+        writable = await handle.createWritable();
+        for (const hash of entry.chunks) {
+          signal?.throwIfAborted();
+          const blockDir = await options.repo.blocks.getDirectoryHandle(hash.slice(0, 2));
+          const plain = await decodeBlock(options.repo, await readFile(blockDir, hash)).catch(
+            (err: unknown) => {
+              // the passphrase was already proven on the manifest, so a block
+              // that fails authentication is damaged, not "wrong passphrase"
+              if (err instanceof EngineError && err.code === 'passphrase-wrong') {
+                throw new EngineError('block-corrupt', `Block ${hash.slice(0, 12)}… is damaged.`, `${hash.slice(0, 12)}…`);
+              }
+              throw err;
+            }
+          );
+          // content addressing doubles as an integrity check: the decoded
+          // chunk must hash to its name (catches bit rot and swapped blocks
+          // in unencrypted repositories; GCM already covers encrypted ones)
+          if ((await sha256Hex(plain)) !== hash) {
+            throw new EngineError('block-corrupt', `Block ${hash.slice(0, 12)}… is damaged.`, `${hash.slice(0, 12)}…`);
+          }
+          await writable.write(plain);
+          written += plain.byteLength;
+          report({ bytesDone: progress.bytesDone + plain.byteLength });
+        }
+        if (written !== entry.size) {
+          throw new EngineError('block-corrupt', `Size mismatch (${written} ≠ ${entry.size} bytes).`, `${written} ≠ ${entry.size} B`);
+        }
+        await writable.close();
+        writable = null;
+        restoredFiles += 1;
+        restoredBytes += written;
+        if (isRenamed) renamed.push({ path: entry.path, to: parts.join('/') });
+        break;
+      } catch (err) {
+        // never commit a half-written file: abort discards the swap file (an
+        // existing file keeps its old content); a file we created is removed
+        if (writable) await writable.abort().catch(() => {});
+        if (created && dir) await dir.removeEntry(fileName).catch(() => {});
+        // the bytes of the discarded attempt no longer count
+        report({ bytesDone: progress.bytesDone - written });
+        if (isFatal(err)) throw err;
+        if (isTransientWriteError(err) && attempt < retryDelays.length) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
+          signal?.throwIfAborted();
+          continue;
+        }
+        failed.push({ path: entry.path, reason: reasonOf(err), error: err });
+        break;
       }
-      if (written !== entry.size) {
-        throw new EngineError('block-corrupt', `Size mismatch (${written} ≠ ${entry.size} bytes).`, `${written} ≠ ${entry.size} B`);
-      }
-      await writable.close();
-      writable = null;
-      restoredFiles += 1;
-      restoredBytes += written;
-      if (isRenamed) renamed.push({ path: entry.path, to: parts.join('/') });
-    } catch (err) {
-      // never commit a half-written file: abort discards the swap file (an
-      // existing file keeps its old content); a file we created is removed
-      if (writable) await writable.abort().catch(() => {});
-      if (created && dir) await dir.removeEntry(fileName).catch(() => {});
-      if (isFatal(err)) throw err;
-      failed.push({ path: entry.path, reason: reasonOf(err), error: err });
     }
     report({ filesDone: progress.filesDone + 1 });
   }
@@ -175,6 +192,12 @@ const OS_LITTER = new Set(['.ds_store', 'desktop.ini', 'thumbs.db', '.localized'
 export interface RestoreTargetCheck {
   /** The target is the repository folder or lies inside it. */
   insideRepo: boolean;
+  /**
+   * The target contains the repository (e.g. the backup drive itself or its
+   * allbacked/ folder): restored folders would land next to the
+   * repositories. Refused like insideRepo.
+   */
+  containsRepo: boolean;
   /** Up to `limit` names already in the target (OS litter ignored). */
   existing: string[];
 }
@@ -193,11 +216,15 @@ export async function inspectRestoreTarget(
   if (!insideRepo && typeof repoRoot.resolve === 'function') {
     insideRepo = (await repoRoot.resolve(target).catch(() => null)) !== null;
   }
+  let containsRepo = false;
+  if (!insideRepo && typeof target.resolve === 'function') {
+    containsRepo = (await target.resolve(repoRoot).catch(() => null)) !== null;
+  }
   const existing: string[] = [];
   for await (const name of target.keys()) {
     if (OS_LITTER.has(name.toLowerCase())) continue;
     existing.push(name);
     if (existing.length >= limit) break;
   }
-  return { insideRepo, existing };
+  return { insideRepo, containsRepo, existing };
 }

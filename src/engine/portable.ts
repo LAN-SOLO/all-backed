@@ -8,6 +8,8 @@
 // The engine therefore decides the target names itself before anything is
 // written — not the UI — and reports every file it had to rename.
 
+import { REPO_DIR } from './types';
+
 // The rules below mirror what Chromium's File System Access API accepts in a
 // real (non-OPFS) folder — measured 2026-10-20 against a local folder handle
 // in Chromium (headless shell 1217) — plus Windows' own limits. OPFS accepts
@@ -68,7 +70,10 @@ export interface PlannedPath {
 export function planRestorePaths(paths: string[][]): PlannedPath[] {
   const dirMap = new Map<string, string>(); // original dir key → target dir path
   const usedDirs = new Map<string, string>(); // key of a target dir → its spelling
-  const usedFiles = new Set<string>(); // keys of target files
+  // "allbacked" at the top level is reserved for the repository folder (a
+  // backup from before 1.0 may hold a source folder of that name): it is
+  // restored as "allbacked (2)" so it never mixes with repositories
+  const usedFiles = new Set<string>([REPO_DIR]); // keys of target files
   const taken = (key: string) => usedDirs.has(key) || usedFiles.has(key);
 
   const targetDir = (segments: string[]): string => {

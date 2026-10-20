@@ -132,7 +132,8 @@ export class EngineError extends Error {
       | 'manifest-invalid'
       | 'block-corrupt'
       | 'archive-invalid'
-      | 'archive-truncated',
+      | 'archive-truncated'
+      | 'source-in-repo',
     message: string,
     /**
      * Language-neutral detail the UI may show next to the translated text

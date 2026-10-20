@@ -254,6 +254,27 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
     return false;
   };
 
+  // archive mode has no handles to compare: the same folder picked or
+  // dropped again has the same name and the same files (path, size, date)
+  const sameFallback = (a: FallbackSource, b: FallbackSource) =>
+    a.name === b.name &&
+    a.files.length === b.files.length &&
+    a.files.every((f, i) => {
+      const g = b.files[i];
+      return f.path === g.path && f.file.size === g.file.size && f.file.lastModified === g.file.lastModified;
+    });
+  const addFallback = (added: FallbackSource[]) => {
+    const fresh: FallbackSource[] = [];
+    for (const source of added) {
+      if ([...fallbackSources, ...fresh].some((known) => sameFallback(known, source))) setError(t('errDuplicateSource'));
+      else fresh.push(source);
+    }
+    if (fresh.length > 0) setFallbackSources((prev) => [...prev, ...fresh]);
+  };
+  // the dev-only test bridge below takes the same path as a real pick
+  const addFallbackRef = useRef(addFallback);
+  addFallbackRef.current = addFallback;
+
   // combined source list: persisted directory handles first, then session
   // sources (webkitdirectory picks and drag & drop on non-Chromium browsers)
   const removeSource = async (index: number) => {
@@ -309,9 +330,7 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
       if (newHandles.length > 0) {
         await onChange({ ...task, sources: [...task.sources, ...newHandles] });
       }
-      if (newFallback.length > 0) {
-        setFallbackSources((prev) => [...prev, ...newFallback]);
-      }
+      if (newFallback.length > 0) addFallback(newFallback);
     } catch (err) {
       setError(errorMessage(err, t));
     }
@@ -336,7 +355,8 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
       file,
     }));
     const name = files[0].path.includes('/') ? files[0].path.split('/')[0] : files[0].path;
-    setFallbackSources((prev) => [...prev, { name, files }]);
+    setError(null);
+    addFallback([{ name, files }]);
     if (fileInput.current) fileInput.current.value = '';
   };
 
@@ -500,7 +520,7 @@ export default function TaskView({ task, lang, onChange, onDelete, onBusyChange 
     const onAdd = (event: Event) => {
       const detail = (event as CustomEvent<FallbackSource>).detail;
       if (detail?.name && Array.isArray(detail.files)) {
-        setFallbackSources((prev) => [...prev, detail]);
+        addFallbackRef.current([detail]);
       }
     };
     window.addEventListener('ab:test:add-source', onAdd);

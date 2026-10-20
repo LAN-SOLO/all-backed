@@ -5,11 +5,12 @@ import {
   ManifestFile,
   Progress,
   ProgressFn,
+  REPO_DIR,
   RunSummary,
   SkippedFile,
 } from './types';
 import { sha256Hex } from './crypto';
-import { fileExists, isSkippableReadError, walkFiles, writeFileRetry, readFile } from './fsx';
+import { isSkippableReadError, nonEmptyFileExists, walkFiles, writeFileRetry, readFile } from './fsx';
 import { OpenRepo, decodeBlock, encodeBlock, openOrInitRepo, writeManifest } from './repo';
 
 /**
@@ -54,7 +55,8 @@ async function storeChunk(
   plain: ArrayBuffer
 ): Promise<'new' | 'dedup'> {
   const dir = await blockDir(repo, hash, true);
-  if (await fileExists(dir, hash)) return 'dedup';
+  // an empty block file is a leftover of an interrupted write: store again
+  if (await nonEmptyFileExists(dir, hash)) return 'dedup';
   await writeFileRetry(dir, hash, await encodeBlock(repo, plain));
   return 'new';
 }
@@ -122,7 +124,14 @@ export async function runBackup(options: BackupOptions): Promise<RunSummary> {
   const skip = (path: string, err: unknown) =>
     skipped.push({ path, reason: err instanceof DOMException ? err.name : String(err) });
   const seenHandles: FileSystemDirectoryHandle[] = [];
-  const usedRoots = new Set<string>();
+  // "allbacked" is the repository folder's name: a source folder of that
+  // name would land next to the repositories when restored into the
+  // backup drive, and be taken for one by "Choose backup location" — it is
+  // stored as "allbacked (2)" instead
+  const usedRoots = new Set<string>([REPO_DIR]);
+  // the destination's repository folder, never backed up itself (the
+  // destination may lie inside a source, e.g. Documents → Documents/Backup)
+  const repoContainer = await options.dest.getDirectoryHandle(REPO_DIR);
   // two sources with the same folder name (e.g. "Documents" from two drives)
   // must not collide in the manifest: the second becomes "Documents (2)"
   const uniqueRoot = (name: string) => {
@@ -153,7 +162,16 @@ export async function runBackup(options: BackupOptions): Promise<RunSummary> {
       }
       if (duplicate) continue;
       seenHandles.push(source.handle);
-      for await (const item of walkFiles(source.handle, uniqueRoot(source.handle.name), skip)) {
+      // a source inside allbacked/ would back up encrypted blocks into the
+      // repository they come from
+      if (
+        (await repoContainer.isSameEntry(source.handle).catch(() => false)) ||
+        (typeof repoContainer.resolve === 'function' &&
+          (await repoContainer.resolve(source.handle).catch(() => null)) !== null)
+      ) {
+        throw new EngineError('source-in-repo', `Source "${source.handle.name}" lies inside ${REPO_DIR}/.`, source.handle.name);
+      }
+      for await (const item of walkFiles(source.handle, uniqueRoot(source.handle.name), skip, repoContainer)) {
         signal?.throwIfAborted();
         let file: File;
         try {

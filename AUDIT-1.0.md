@@ -153,6 +153,9 @@ Restore (Chrome)
 - [ ] Version in leeren Ordner wiederherstellen → Dateien byte-gleich (macOS: `diff -r`, Windows: `fc /b` oder Explorer-Vergleich), Umlaute korrekt
 - [ ] Backup von macOS mit Datei `a:b.txt` unter Windows wiederherstellen → Datei als `a_b.txt` wiederhergestellt und in der gelben Liste „unter anderem Namen“ geführt, Rest vollständig
 - [ ] Restore in einen nicht leeren Ordner → Rückfrage mit Inhaltsvorschau; „Abbrechen“ schreibt nichts, „Überschreiben & wiederherstellen“ stellt her
+- [ ] Restore auf das Backup-Laufwerk selbst (Ordner mit `allbacked`) → Meldung „enthält das Backup selbst“, nichts geschrieben
+- [ ] Ziel innerhalb einer Quelle (z. B. Dokumente → Dokumente/Backup) → zweiter Lauf 0 neue Blöcke, `allbacked` nicht im Backup
+- [ ] Laufwerk (USB-Stick) volllaufen lassen → Meldung „Ziel-Laufwerk ist voll“; nach Platzschaffen Lauf OK und Restore vollständig
 - [ ] Großes Backup / großer Restore → [Abbrechen] im Protokoll: Banner „abgebrochen“ (gelb), keine neue Version, keine halbe Datei im Ziel; nächster Lauf dedupliziert
 
 Archiv-Modus (Firefox, sowie Chrome mit `?fallback`)
@@ -351,3 +354,89 @@ Chrome 102 / Firefox 115 (Manifest-Minima).
 - Restore-Ziel-Schreibfehler (gesperrte Zieldatei) werden pro Datei gelistet,
   aber nicht wiederholt (nur Backup-Ziel hat Retry).
 - Übrige Punkte aus 8.4 und Abschnitt 6 unverändert.
+
+## 10. Runde 3 (2026-10-20, Abschluss)
+
+Basis `9514145`. Ziel: jede Aussage in Hilfe (DE+EN), README und UI-Texten
+gegen den Code prüfen, End-to-End-Nutzerwege inkl. Fehlerfällen in echtem
+Chromium fahren, Restpunkte aus 9.4 schließen. Tauri-Werkzeuge (Windows-
+`cargo check`, `cargo clippy`, `cargo audit`) entfallen weiterhin — kein Rust.
+
+### 10.1 Was tatsächlich ausgeführt wurde
+
+| Weg | Ergebnis |
+| --- | --- |
+| `pnpm test` (Node, memfs) | PASS — Basis + R1–R8, R10–R21 |
+| `tests/ui/self.mjs` — `abSelfTest()` in echtem Chromium (chrome-headless-shell 1217, echtes OPFS) | PASS inkl. R18–R21 |
+| `tests/ui/journeys.mjs` DE dunkel 1024×700 und EN hell 760×520 | je 20/20 PASS (J1–J8, s. u.) |
+| `tests/ui/flow.mjs` DE dunkel 760×520 / EN hell 640×480 | 6/6 PASS |
+| `tests/ui/archive.mjs` EN hell / DE dunkel | 5/5 PASS |
+| Negativkontrolle R21 (alter Dedup-Check `getFileHandle` ohne Größe, Manifestliste ohne Größenfilter) | FAIL („Entschlüsselung fehlgeschlagen — falsche Passphrase?“ durch leeres Manifest) |
+| Hilfe-Parität (Skript): Tutorial-Schritte und Absätze je Abschnitt DE = EN | gleich (6 Schritte, 10 Abschnitte) |
+| `pnpm typecheck` / `pnpm build` / `pnpm build:firefox` / `pnpm audit --prod` | fehlerfrei / keine Befunde; Test-Brücken nicht im Bundle |
+
+Nutzerwege (`tests/ui/journeys.mjs`, jeweils DE und EN):
+J1 Erststart → Tutorial → Esc → F2 → Ordner-Dialog **abgebrochen** (nichts
+hinzugefügt, keine Meldung) · J2 zwei Quellen, gleiche Quelle doppelt
+abgelehnt, Ziel-Dialog abgebrochen, Ziel **innerhalb einer Quelle**, Quelle
+namens `allbacked`, verschlüsselter Lauf · J3 Folge-Lauf 0 neue Blöcke ·
+J4 **Laufwerk voll** (`QuotaExceededError`) → „Ziel-Laufwerk ist voll“, Karte
+„Letzter Lauf“ rot, keine neue Version · J5 **Zugriff verweigert**
+(schreibgeschützt) → Rechte-Meldung · J6 **Neuladen mitten im Lauf** → Aufgabe
+erhalten, keine halbe Version, nächster Lauf OK · J7 Restore: Ort-Dialog
+abgebrochen, Ziel = Backup-Laufwerk und Ziel = `allbacked/` abgelehnt,
+Ziel-Dialog abgebrochen (nichts geschrieben), **kurz gesperrte Zieldatei**
+(2× `NoModificationAllowedError`) → 3 Versuche, vollständig; **dauerhaft
+gesperrt** → nur diese Datei übersetzt gelistet, alter Inhalt bleibt ·
+J8 Archiv-Modus: gleicher Ordner doppelt abgelehnt. Kein horizontaler Überlauf.
+
+### 10.2 Behobene Fehler
+
+| # | Schwere | Fehler | Fix |
+| --- | --- | --- | --- |
+| R3-1 | **hoch** | **Leere Blockdatei nach unterbrochenem Schreiben galt für immer als gesichert.** `getFileHandle({create:true})` legt sofort eine 0-Byte-Datei an; schlug das Schreiben fehl (Laufwerk voll, Sperre nach allen Wiederholungen) oder wurde der Tab geschlossen/neu geladen, blieb sie liegen. Der nächste Lauf sah „Block vorhanden“ → Dedup → „Verify OK“ (Stichprobe traf sie selten), die Datei war aber **nicht wiederherstellbar** („Datenblock beschädigt“). Im UI-Lauf J4/J6 in Chromium gefunden (2 von 73 Dateien betroffen). Ein leeres **Manifest** (Abbruch beim Schreiben) ließ jede weitere Entsperrung und jeden Folge-Lauf mit „falsche Passphrase“ scheitern | `writeFile` entfernt eine selbst angelegte Datei, wenn das Schreiben scheitert; Dedup nur bei Block mit Inhalt (`nonEmptyFileExists`) — bestehende leere Blöcke werden beim nächsten Lauf geheilt; `listManifests` ignoriert 0-Byte-Manifeste, die Passphrase-Prüfung leere Blöcke, ein leeres `ab-repo.json` gilt als nicht vorhanden — R21, Negativkontrolle FAIL |
+| R3-2 | mittel | Restore in einen Ordner, der das Repository **enthält** (Backup-Laufwerk, `allbacked/`), wurde nur über die „nicht leer“-Rückfrage abgefangen | `inspectRestoreTarget().containsRepo` → abgelehnt mit eigener Meldung — R18, J7 |
+| R3-3 | mittel | Quelle namens `allbacked` kollidierte mit dem Repository-Ordner (Restore aufs Backup-Laufwerk mischte sie unter die Repositories; „Backup-Ort wählen“ auf dem Wiederhergestellten hielt sie für ein Repository) | Name reserviert: Backup speichert `allbacked (2)/…`, Restore älterer Backups ebenso — R19, J2/J7 |
+| R3-4 | mittel | Ziel **innerhalb einer Quelle** (Dokumente → Dokumente/Backup): jeder Lauf sicherte das eigene Repository mit (wächst mit jedem Lauf); eine Quelle innerhalb von `allbacked/` sicherte verschlüsselte Blöcke in sich selbst | Scan überspringt den `allbacked`-Ordner des Ziels (`isSameEntry`); Quelle in `allbacked/` → `source-in-repo` mit DE/EN-Meldung — R19, J2 |
+| R3-5 | mittel | Schreibfehler auf dem **Restore-Ziel** bei kurzen Sperren wurden nicht wiederholt | gleiche Wiederholung wie beim Backup-Ziel (150/500/1500 ms, ganze Datei, atomar), danach gelistet; bestehende Datei behält Inhalt — R20, J7 |
+| R3-6 | niedrig | **Falsche Meldung bei vollem Laufwerk** im Direktmodus: „Der Browser-Speicher reicht nicht aus … in Chrome direkt in einen Ordner sichern“ — obwohl schon direkt in einen Ordner gesichert wurde | Direktmodus: „Das Ziel-Laufwerk ist voll — dort Platz schaffen oder einen anderen Ordner wählen“; Archiv-Modus unverändert — J4 |
+| R3-7 | niedrig | Hilfe „Derselbe Ordner lässt sich nicht doppelt hinzufügen“ stimmte im **Archiv-Modus** nicht | gleicher Name + gleiche Dateien (Pfad, Größe, Datum) → „bereits in der Liste“; Test-Brücke nutzt denselben Pfad — J8 |
+
+Hilfe (DE + EN) und README angepasst: reservierter Name `allbacked`, Ziel in
+einer Quelle, Quelle in `allbacked`, Restore-Ziel mit Repository abgelehnt,
+Wiederholung bei gesperrten Restore-Zieldateien, Meldung bei vollem
+Laufwerk, unterbrochene Läufe (Tab zu, Absturz, Laufwerk ab).
+UI-Szenarien aus dem Scratch nach `tests/ui/` übernommen (Runner mit
+`check()` und Exit-Code, Pfade relativ, Screenshots in `testdata-out/ui/`);
+reine Mess-Skripte (Namens-Orakel, Drag-Probe) bleiben draußen.
+
+### 10.3 Geprüfte Aussagen (Hilfe, README, UI) — bestätigt
+
+Tutorial 6 Schritte, ←/→/Esc; F1 öffnet/schließt, F2/F5/F6/F8, F8 bzw.
+Löschen-Knopf zweimal binnen 3 s; ?-Knopf und EN/DE unten links,
+Sonne/Mond daneben; Statuspunkt grün/rot/Ring; Sperren während des Laufs
+(Name, Quellen, Ziel, Löschen, Navigation, F2/F6); Speicher-Vorprüfung im
+Archiv-Modus mit „benötigt/frei“; PBKDF2-SHA-256 600 000 (alt 310 000),
+AES-256-GCM, Passphrase nirgends gespeichert (nicht im Task-Objekt, nicht in
+localStorage); Verschlüsselung beim ersten Lauf festgelegt
+(`repo-unencrypted`/`passphrase-required`); Passphrase-Prüfung vor dem
+Schreiben; Verify vor dem Manifest; 4-MiB-Blöcke, gzip, Dedup; Versionen in
+Ortszeit; Download-Namen mit Ortsdatum; Rückfrage bei nicht leerem Ziel;
+Umbenennungsliste; README-Befehle und Port 5173 (Vite-Standard).
+
+### 10.4 Nur auf echter Hardware prüfbar
+
+- Welche `DOMException` Chrome bei **vollem Laufwerk** in einem echten Ordner
+  liefert (angenommen `QuotaExceededError`; liefert Chrome
+  `InvalidStateError`, greift zuerst die Sperr-Wiederholung und die Meldung
+  lautet „gesperrt“) — Windows (USB-Stick füllen) und macOS.
+- Virenscanner-/OneDrive-Sperren auf Restore-Zieldateien unter Windows
+  (welcher Fehlername; Retry deckt `NoModificationAllowedError`/`InvalidStateError`).
+- Echter Absturz/Abziehen des Laufwerks mitten im Schreiben: dass Chrome
+  wirklich nur 0-Byte-Dateien (bzw. verwaiste `.crswap`) hinterlässt — die
+  Heilung deckt genau diese beiden Fälle ab.
+- Übrige Punkte aus 8.4, 9.4 (Pfade > 260 Zeichen, Laufwerkswurzel, native
+  Dialoge, Rechte-Prompts, Drag & Drop, Downloads, Toolbar, Firefox-Laufzeit)
+  und Checkliste Abschnitt 6 — dort ergänzt um: Quelle = Ordner, der das Ziel
+  enthält → zweiter Lauf 0 neue Blöcke; Restore auf das Backup-Laufwerk
+  selbst → Ablehnung.

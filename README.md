@@ -102,3 +102,29 @@ Audit, Testmatrix und manuelle Checkliste für 1.0: `AUDIT-1.0.md`.
 - Fehler werden sprachneutral gespeichert (`errorInfo`) und in der aktuellen
   Sprache angezeigt; `.tar`-Fehler sind übersetzt.
 - Download-Namen tragen das lokale Datum (nicht UTC).
+
+## Verhalten seit Audit-Runde 3
+
+- Restore-Ziel, das das Repository **enthält** (Backup-Laufwerk selbst,
+  `allbacked/`), wird wie ein Ziel im Repository abgelehnt
+  (`inspectRestoreTarget().containsRepo`).
+- Schreibfehler auf dem Restore-Ziel bei kurzen Sperren
+  (`NoModificationAllowedError`/`InvalidStateError`) werden wie beim
+  Backup-Ziel bis zu dreimal wiederholt (ganze Datei, atomar); dauerhaft
+  gesperrte Dateien werden gelistet, eine bestehende Datei bleibt unverändert.
+- Der Name `allbacked` ist für den Repository-Ordner reserviert: Eine Quelle
+  dieses Namens wird als `allbacked (2)` gesichert, ältere Backups werden so
+  wiederhergestellt. Liegt das Ziel in einer Quelle, wird der eigene
+  `allbacked`-Ordner beim Scan übersprungen; eine Quelle innerhalb von
+  `allbacked/` bricht den Lauf mit `source-in-repo` ab.
+- Archiv-Modus: derselbe Ordner (gleicher Name, gleiche Dateien) lässt sich
+  nicht doppelt hinzufügen.
+- Unterbrochenes Schreiben (Laufwerk voll, Tab geschlossen, Absturz)
+  hinterlässt keine wirksame 0-Byte-Datei mehr: `writeFile` entfernt selbst
+  angelegte Dateien bei Fehlern, Dedup zählt nur Blöcke mit Inhalt
+  (`nonEmptyFileExists`, heilt bestehende leere Blöcke), 0-Byte-Manifeste
+  und ein leeres `ab-repo.json` werden ignoriert.
+- Volles Ziel-Laufwerk im Direktmodus meldet `errDiskFull` statt des
+  Browser-Speicher-Textes.
+- UI-Szenarien für echtes Chromium liegen in `tests/ui/` (siehe dortige
+  README).

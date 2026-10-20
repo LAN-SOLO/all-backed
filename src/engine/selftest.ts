@@ -5,7 +5,7 @@
 
 import { runBackup } from './backup';
 import { runRestore } from './restore';
-import { findRepos, listManifests, openRepo } from './repo';
+import { findRepos, listManifests, openRepo, readManifest } from './repo';
 import { walkFiles, readFile, writeFile, writeFileRetry, getDirByPath } from './fsx';
 import { openOrInitRepo } from './repo';
 import { inspectRestoreTarget } from './restore';
@@ -84,6 +84,10 @@ async function treeText(dir: FileSystemDirectoryHandle): Promise<Map<string, str
 }
 
 /** Regression tests for the 1.0 audit fixes (see AUDIT-1.0.md). */
+async function readManifestFiles(repo: Awaited<ReturnType<typeof openRepo>>, name: string): Promise<string[]> {
+  return (await readManifest(repo, name)).files.map((f) => f.path);
+}
+
 async function regressionTests(opfs: FileSystemDirectoryHandle, t: (m: string) => void): Promise<void> {
   const reg = await opfs.getDirectoryHandle('ab-reg', { create: true });
   const fresh = async (name: string) => reg.getDirectoryHandle(name, { create: true });
@@ -581,6 +585,7 @@ async function regressionTests(opfs: FileSystemDirectoryHandle, t: (m: string) =
   let failuresLeft = 2;
   let attempts = 0;
   const flaky = {
+    removeEntry: (name: string) => retryDir.removeEntry(name),
     getFileHandle: async (name: string, opts?: FileSystemGetFileOptions) => {
       const real = await retryDir.getFileHandle(name, opts);
       return {
@@ -688,6 +693,152 @@ async function regressionTests(opfs: FileSystemDirectoryHandle, t: (m: string) =
   const missing = missingTranslations();
   if (missing.length > 0) throw new Error(`R17: missing translations ${missing.join(', ')}`);
   t('R17 engine/tar/cancel errors translated, EN/DE string sets complete');
+
+  // R18: a restore target that CONTAINS the repository (the backup drive,
+  // its allbacked/ folder) is refused like one inside it
+  const parentCheck = await inspectRestoreTarget(portDst, portRepoDir);
+  const containerCheck = await inspectRestoreTarget(await portDst.getDirectoryHandle('allbacked'), portRepoDir);
+  const unrelatedCheck = await inspectRestoreTarget(litter, portRepoDir);
+  if (!parentCheck.containsRepo || parentCheck.insideRepo || !containerCheck.containsRepo || unrelatedCheck.containsRepo || sameRepo.containsRepo) {
+    throw new Error(`R18: ${JSON.stringify({ parentCheck, containerCheck, unrelatedCheck })}`);
+  }
+  t('R18 restore target containing the repository detected');
+
+  // R19: the name "allbacked" — a source folder of that name is stored as
+  // "allbacked (2)" (also on restore of older backups), a destination inside
+  // a source never backs up its own repository, a source inside allbacked/
+  // is refused
+  const abNameParent = await fresh('r19-src');
+  const abNameSrc = await abNameParent.getDirectoryHandle('allbacked', { create: true });
+  await writeFile(abNameSrc, 'mine.txt', 'own file');
+  const abNameDst = await fresh('r19-dst');
+  const abNameRun = await runBackup({ sources: [{ kind: 'handle', handle: abNameSrc }], dest: abNameDst, taskName: 'names' });
+  const abNameRepo = await openRepo(await getDirByPath(abNameDst, ['allbacked', 'names'], false));
+  const abNameOut = await fresh('r19-out');
+  await runRestore({ repo: abNameRepo, manifestName: abNameRun.manifestName, target: abNameOut });
+  const abNameTree = await treeText(abNameOut);
+  const oldPlan = planRestorePaths([['allbacked', 'x.txt'], ['ALLBACKED'], ['docs', 'allbacked', 'y.txt']]).map((p) => p.parts.join('/'));
+  // destination inside the source: Documents → Documents/Backup
+  const nestSrc = await fresh('r19-nest-src');
+  await writeFile(nestSrc, 'letter.txt', 'dear');
+  const nestDst = await nestSrc.getDirectoryHandle('Backup', { create: true });
+  await runBackup({ sources: [{ kind: 'handle', handle: nestSrc }], dest: nestDst, taskName: 'nest' });
+  const nestRun2 = await runBackup({ sources: [{ kind: 'handle', handle: nestSrc }], dest: nestDst, taskName: 'nest' });
+  const nestRepo = await openRepo(await getDirByPath(nestDst, ['allbacked', 'nest'], false));
+  const nestPaths = (await readManifestFiles(nestRepo, nestRun2.manifestName)).sort();
+  let inRepoErr: unknown = null;
+  try {
+    await runBackup({ sources: [{ kind: 'handle', handle: nestRepo.blocks }], dest: nestDst, taskName: 'nest' });
+  } catch (err) {
+    inRepoErr = err;
+  }
+  if (
+    abNameTree.get('allbacked (2)/mine.txt') !== 'own file' ||
+    abNameTree.size !== 1 ||
+    JSON.stringify(oldPlan) !== JSON.stringify(['allbacked (2)/x.txt', 'ALLBACKED (3)', 'docs/allbacked/y.txt']) ||
+    JSON.stringify(nestPaths) !== JSON.stringify(['r19-nest-src/letter.txt']) ||
+    !(inRepoErr instanceof EngineError && inRepoErr.code === 'source-in-repo')
+  ) {
+    throw new Error(`R19: ${JSON.stringify({ tree: [...abNameTree.keys()], oldPlan, nestPaths, inRepoErr: String(inRepoErr) })}`);
+  }
+  t('R19 "allbacked" source names kept apart, own repository never backed up');
+
+  // R20: a short lock on a restore target file is retried (whole file
+  // again); a lasting lock lists only that file and keeps its old content
+  const lockOut = await fresh('lock-out');
+  const locks = new Map<string, number>([['c1.bin', 2], ['c2.bin', 99]]);
+  let lockAttempts = 0;
+  const lockedDir = (real: FileSystemDirectoryHandle): FileSystemDirectoryHandle =>
+    ({
+      name: real.name,
+      kind: 'directory',
+      getDirectoryHandle: async (name: string, opts?: FileSystemGetDirectoryOptions) => lockedDir(await real.getDirectoryHandle(name, opts)),
+      removeEntry: (name: string, opts?: FileSystemRemoveOptions) => real.removeEntry(name, opts),
+      getFileHandle: async (name: string, opts?: FileSystemGetFileOptions) => {
+        const fh = await real.getFileHandle(name, opts);
+        return {
+          kind: 'file',
+          name,
+          createWritable: async () => {
+            const w = await fh.createWritable();
+            if (locks.has(name)) lockAttempts++;
+            return {
+              write: (d: FileSystemWriteChunkType) => w.write(d),
+              abort: () => w.abort(),
+              close: async () => {
+                const left = locks.get(name) ?? 0;
+                if (left > 0) {
+                  locks.set(name, left - 1);
+                  await w.abort();
+                  throw new DOMException('locked', 'NoModificationAllowedError');
+                }
+                return w.close();
+              },
+            };
+          },
+        };
+      },
+    }) as unknown as FileSystemDirectoryHandle;
+  const lockSub = await lockOut.getDirectoryHandle('cancel-src', { create: true });
+  await writeFile(lockSub, 'c2.bin', 'old content');
+  const lockRun = await runRestore({
+    repo: cancelRepo,
+    manifestName: afterCancel.manifestName,
+    target: lockedDir(lockOut),
+    retryDelays: [1, 1, 1],
+  });
+  const lockTree = await treeText(lockOut);
+  if (
+    lockRun.fileCount !== 5 ||
+    lockRun.failed.length !== 1 ||
+    lockRun.failed[0].path !== 'cancel-src/c2.bin' ||
+    lockTree.get('cancel-src/c2.bin') !== 'old content' ||
+    lockTree.get('cancel-src/c1.bin')?.length !== 70 * 1024 ||
+    lockAttempts !== 3 + 4
+  ) {
+    throw new Error(`R20: files=${lockRun.fileCount} failed=${JSON.stringify(lockRun.failed.map((f) => f.path))} attempts=${lockAttempts}`);
+  }
+  t('R20 locked restore target files retried, a lasting lock lists only that file');
+
+  // R21: an interrupted block/manifest write (tab closed, crash, drive full)
+  // leaves a 0-byte file — it must not count as stored ("dedup") forever,
+  // must not fake a wrong passphrase and must not show up as a version
+  const crashSrc = await fresh('crash-src');
+  await writeFile(crashSrc, 'kept.txt', 'kept content');
+  await writeFile(crashSrc, 'victim.txt', 'content whose block write was interrupted');
+  const crashDst = await fresh('crash-dst');
+  const crashRepo = await openOrInitRepo(crashDst, 'crash', PASS);
+  const victimHash = await sha256Hex(new TextEncoder().encode('content whose block write was interrupted').buffer as ArrayBuffer);
+  const victimDir = await crashRepo.blocks.getDirectoryHandle(victimHash.slice(0, 2), { create: true });
+  await victimDir.getFileHandle(victimHash, { create: true }); // created, never written
+  const emptyMan = await crashRepo.manifests.getFileHandle('manifest-2999-01-01T00-00-00-000Z.json.enc', { create: true });
+  void emptyMan;
+  const crashRun = await runBackup({ sources: [{ kind: 'handle', handle: crashSrc }], dest: crashDst, taskName: 'crash', passphrase: PASS, verifySamples: 0 });
+  const crashVersions = await listManifests(crashRepo);
+  const crashOut = await fresh('crash-out');
+  const crashRestore = await runRestore({ repo: await openRepo(crashRepo.root, PASS), manifestName: crashVersions[0], target: crashOut });
+  // a write that fails (drive full) removes the file it created
+  const fullDir = await fresh('full-dir');
+  const fullProxy = {
+    getFileHandle: async (name: string, opts?: FileSystemGetFileOptions) => {
+      const real = await fullDir.getFileHandle(name, opts);
+      return { createWritable: async () => { const w = await real.createWritable(); return { write: async () => { throw new DOMException('full', 'QuotaExceededError'); }, abort: () => w.abort(), close: () => w.close() }; } };
+    },
+    removeEntry: (name: string) => fullDir.removeEntry(name),
+  } as unknown as FileSystemDirectoryHandle;
+  await writeFile(fullProxy, 'blk', 'data').catch(() => {});
+  const fullLeft = (await treeText(fullDir)).size;
+  if (
+    crashRun.newBlocks !== 2 ||
+    crashVersions.length !== 1 ||
+    crashVersions[0] !== crashRun.manifestName ||
+    crashRestore.failed.length !== 0 ||
+    (await treeText(crashOut)).get('crash-src/victim.txt') !== 'content whose block write was interrupted' ||
+    fullLeft !== 0
+  ) {
+    throw new Error(`R21: ${JSON.stringify({ newBlocks: crashRun.newBlocks, crashVersions, failed: crashRestore.failed.map((f) => f.path), fullLeft })}`);
+  }
+  t('R21 empty leftovers of interrupted writes are rewritten, never deduplicated or listed');
 
   await opfs.removeEntry('ab-reg', { recursive: true }).catch(() => {});
 }

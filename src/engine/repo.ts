@@ -81,6 +81,8 @@ async function verifyKey(repo: OpenRepo): Promise<void> {
       // only real blocks pin the key — never a stray swap/temp file (e.g. a
       // leftover "<hash>.crswap" after a crash) or a .DS_Store
       if (file.kind !== 'file' || !HASH_RE.test(name)) continue;
+      // an empty block is a leftover of an interrupted write, not a proof
+      if ((await (file as FileSystemFileHandle).getFile()).size === 0) continue;
       await decryptOrThrow(repo.key, await readFile(sub, name));
       return;
     }
@@ -203,7 +205,11 @@ export async function findRepos(
 export async function listManifests(repo: OpenRepo): Promise<string[]> {
   const names: string[] = [];
   for await (const [name, handle] of repo.manifests.entries()) {
-    if (handle.kind === 'file' && /^manifest-.+\.json(\.enc)?$/.test(name)) names.push(name);
+    if (handle.kind !== 'file' || !/^manifest-.+\.json(\.enc)?$/.test(name)) continue;
+    // a 0-byte manifest is a run interrupted while writing it (tab closed,
+    // crash) — not a version; it would otherwise fail every unlock
+    if ((await (handle as FileSystemFileHandle).getFile()).size === 0) continue;
+    names.push(name);
   }
   return names.sort().reverse(); // newest first (ISO timestamps in name)
 }
